@@ -35,6 +35,8 @@ const BOARD = [
   { id: "idle", label: "Idle" },
 ];
 const sessionRoot = () => `${home()}/.copilot/session-state`;
+const HELPER = () => `${appHome()}/mods/maestro/helper.mjs`;
+const helper = (...args) => exec("node", [HELPER(), ...args.map(String)]);
 
 // ~/git/<org>/<repo>/… or ~/git/_opensource/<org>/<repo>/…; else the folder's own name.
 function place(cwd) {
@@ -155,21 +157,14 @@ export default class Maestro extends View {
   async bindByAncestry() {
     const unbound = this.live().filter((a) => !a.address.includes("/") && !this.snaps.get(a.address)?.session_id && !this.fallback.has(a.address));
     if (!unbound.length) return;
-    let locks, procs;
+    let locks, pairs;
     try {
-      locks = await exec("sh", ["-c", 'ls -1 "$1"/*/inuse.*.lock 2>/dev/null; true', "x", sessionRoot()]);
-      procs = await exec("ps", ["-axo", "pid=,ppid="]);
+      locks = JSON.parse((await helper("locks", sessionRoot())).stdout);
+      pairs = JSON.parse((await helper("procs")).stdout);
     } catch { return; }
-    const parent = new Map();
-    for (const l of procs.stdout.split("\n")) {
-      const [pid, ppid] = l.trim().split(/\s+/).map(Number);
-      if (pid) parent.set(pid, ppid);
-    }
+    const parent = new Map(pairs);
     const owner = new Map(); // live pid -> session id
-    for (const p of locks.stdout.split("\n")) {
-      const m = p.match(/session-state\/([^/]+)\/inuse\.(\d+)\.lock$/);
-      if (m && parent.has(Number(m[2]))) owner.set(Number(m[2]), m[1]);
-    }
+    for (const l of locks) if (parent.has(l.pid)) owner.set(l.pid, l.id);
     for (const a of unbound) {
       let fg;
       try { fg = JSON.parse((await hc(["get", a.address, "--json"])).stdout)?.foreground?.pid; } catch { continue; }
@@ -184,10 +179,10 @@ export default class Maestro extends View {
 
   // Session folders touched in the last day, newest first, read from workspace.yaml.
   async loadRecent() {
-    let r;
-    try { r = await exec("sh", ["-c", 'cd "$1" 2>/dev/null && ls -1t | head -60', "x", sessionRoot()]); } catch { return; }
+    let ids;
+    try { ids = JSON.parse((await helper("recent", sessionRoot(), 60, Date.now() - RECENT_MS)).stdout).map((x) => x.id); } catch { return; }
     const out = [];
-    for (const id of r.stdout.split("\n").filter(Boolean)) {
+    for (const id of ids) {
       let y = null;
       try { y = await readTextFile(`${sessionRoot()}/${id}/workspace.yaml`); } catch {}
       if (!y) continue;
@@ -218,8 +213,7 @@ export default class Maestro extends View {
     if (L.busy) return;
     L.busy = true;
     try {
-      const script = 's=$(wc -c < "$1" | tr -d " ") || exit 1; o=$2; m=$3; echo "$s"; if [ "$s" -lt "$o" ]; then o=0; fi; if [ $((s-o)) -gt "$m" ]; then o=$((s-m)); echo cut; else echo whole; fi; tail -c +$((o+1)) "$1" | head -c $((s-o))';
-      const r = await exec("sh", ["-c", script, "x", L.path, String(L.offset), String(MAX_TAIL)]);
+      const r = await helper("tail", L.path, L.offset, MAX_TAIL);
       if (r.code !== 0) return;
       const nl1 = r.stdout.indexOf("\n");
       const nl2 = r.stdout.indexOf("\n", nl1 + 1);
@@ -311,7 +305,11 @@ export default class Maestro extends View {
     for (const [key, items] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const worst = items.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
       rows.push(this.groupRow(t, key, items.length, worst, items[0]));
-      for (const x of items.sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || q.a.seq - p.a.seq)) {
+      const pinned = shared("maestro.order") ?? [];
+      const at = (x) => { const i = pinned.indexOf(x.tagKey); return i < 0 ? Infinity : i; };
+      items.sort((p, q) => at(p) - at(q) || RANK[q.a.status] - RANK[p.a.status] || q.a.seq - p.a.seq);
+      for (const [i, x] of items.entries()) { x.prevKey = items[i - 1]?.tagKey ?? null; x.nextKey = items[i + 1]?.tagKey ?? null; x.siblings = items.map((y) => y.tagKey); }
+      for (const x of items) {
         this.pushSession(t, rows, order, x, kidsOf, now, 0);
       }
     }
@@ -361,6 +359,17 @@ export default class Maestro extends View {
         .when(list.length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No Copilot sessions running.")))
         .children(rows))
       .child(this.footer(t, list, now));
+  }
+
+  // Maestro's own order: Herdr's tab order is untouched.
+  move(x, dir) {
+    const list = [...x.siblings];
+    const i = list.indexOf(x.tagKey);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    const rest = (shared("maestro.order") ?? []).filter((k) => !list.includes(k));
+    setShared("maestro.order", [...list, ...rest].slice(0, 400));
   }
 
   openBoard() {
@@ -522,6 +531,12 @@ export default class Maestro extends View {
           .on_mouse_down("left", stop)
           .on_click((_e, cx) => { cx.stop_propagation(); if (open) this.collapsed.add(a.address); else this.collapsed.delete(a.address); cx.notify(); })
           .child(`${open ? "▾" : "▸"} ${kids}`)))
+        .when(depth === 0 && Boolean(x.prevKey), (el) => el.child(div().id(`up-${a.address}`).px(2).text_size(11).text_color(t.dim).hover((st) => st.text_color(t.foreground))
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => { cx.stop_propagation(); this.move(x, -1); }).child("↑")))
+        .when(depth === 0 && Boolean(x.nextKey), (el) => el.child(div().id(`dn-${a.address}`).px(2).text_size(11).text_color(t.dim).hover((st) => st.text_color(t.foreground))
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => { cx.stop_propagation(); this.move(x, 1); }).child("↓")))
         .child(div().id(`go-${a.address}`).px(4).text_color(t.dim).hover((st) => st.text_color(t.foreground))
           .on_mouse_down("left", stop)
           .on_click((_e, cx) => { cx.stop_propagation(); if (!a.pane) { run("terminal.peek", { terminal: a.address }); return; } run("layout.switch", { name: shared("maestro.return") ?? "catppuccin" }); run("pane.focus", { pane: a.pane }); })

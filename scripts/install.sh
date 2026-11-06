@@ -8,6 +8,15 @@ COPILOT="${COPILOT_HOME:-$HOME/.copilot}"
 KEY="${MAESTRO_KEY:-cmd-shift-m}"
 RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-catppuccin}"
 
+if [[ "${1:-}" == "--uninstall" ]]; then
+  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
+    if [[ -L "$p" && "$(readlink "$p")" == "$ROOT"* ]]; then rm "$p"; echo "removed $p"; fi
+  done
+  python3 "$ROOT/scripts/lib/uninstall.py" "$COPILOT/settings.json" "$HERDR/keys.json"
+  echo "Maestro uninstalled. Runtime data stays in $HERDR/data/maestro."
+  exit 0
+fi
+
 link() {
   if [[ -L "$2" && "$(readlink "$2")" == "$1" ]]; then return; fi
   if [[ -e "$2" || -L "$2" ]]; then mv "$2" "$2.backup.$(date +%Y%m%d%H%M%S)"; fi
@@ -39,11 +48,12 @@ def edit(path, change):
     return True
 
 def status_line(d):
+    want = f'node "{script}"'
     current = d.get("statusLine", {}).get("command")
-    if current and current != script:
+    if current and current != want and "maestro-statusline" not in current:
         print(f"statusLine already set to {current}; leaving it", file=sys.stderr)
         return
-    d["statusLine"] = {"type": "command", "command": script}
+    d["statusLine"] = {"type": "command", "command": want}
 
 def bindings(d):
     d.setdefault("global", {})[key] = f"layout.switch:maestro"

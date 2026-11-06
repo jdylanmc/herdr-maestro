@@ -16,8 +16,8 @@ export function applyLines(s, text) {
     if (!line) continue;
     if (CALL.test(line)) {
       if (line.includes('"agentId":')) continue;
+      if (/utility/i.test(line.match(CALL_MODEL)?.[1] ?? "")) continue;
       s.effort = line.match(CALL_EFFORT)?.[1] ?? s.effort;
-      s.lastModel = line.match(CALL_MODEL)?.[1] ?? s.lastModel;
       continue;
     }
     if (!WANTED.test(line)) continue;
