@@ -4,11 +4,12 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder } from "herdr";
+import { agents, terminals, panes, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, focused } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention } from "./log.js";
 
 const MAX_TAIL = 8_000_000;
+const RECENT_MS = 24 * 3600_000;
 const KEEP_FINISHED_MS = 10 * 60_000;
 const GROUPS = [
   { id: "space", label: "Space" },
@@ -51,6 +52,8 @@ export default class Maestro extends View {
     this.fallback = new Map();  // terminal address -> session id (process ancestry)
     this.logs = new Map();      // session id -> { s, offset, carry, path, busy }
     this.collapsed = new Set(); // terminal addresses whose subagent tree is folded
+    this.recent = [];           // { id, name, cwd, updated } of sessions not running
+    this.showRecent = true;
     cx.spawn(async (cx) => {
       await fs.mkdir(snapDir(), { recursive: true }).catch(() => {});
       await this.refresh();
@@ -61,6 +64,8 @@ export default class Maestro extends View {
         cx.notify();
       }
     });
+    cx.spawn(async (cx) => { await this.loadRecent(); cx.notify(); });
+    cx.timer.every(30000, (cx) => cx.spawn(async (cx) => { await this.loadRecent(); cx.notify(); }));
     cx.timer.every(3000, (cx) => cx.spawn(async (cx) => { await this.tailAll(); cx.notify(); }));
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
   }
@@ -116,6 +121,23 @@ export default class Maestro extends View {
         if (p === fg) { this.fallback.set(a.address, sid); break; }
       }
     }
+  }
+
+  // Session folders touched in the last day, newest first, read from workspace.yaml.
+  async loadRecent() {
+    let r;
+    try { r = await exec("sh", ["-c", 'cd "$1" 2>/dev/null && ls -1t | head -60', "x", sessionRoot()]); } catch { return; }
+    const out = [];
+    for (const id of r.stdout.split("\n").filter(Boolean)) {
+      let y = null;
+      try { y = await readTextFile(`${sessionRoot()}/${id}/workspace.yaml`); } catch {}
+      if (!y) continue;
+      const f = (k) => y.match(new RegExp(`^${k}: (.*)$`, "m"))?.[1]?.trim() ?? null;
+      const updated = Date.parse(f("updated_at"));
+      if (!updated || Date.now() - updated > RECENT_MS) continue;
+      out.push({ id, name: f("name") ?? id.slice(0, 8), cwd: f("cwd"), updated });
+    }
+    this.recent = out.sort((a, b) => b.updated - a.updated);
   }
 
   sessionFor(addr) {
@@ -221,6 +243,21 @@ export default class Maestro extends View {
       }
     }
     setAgentOrder(order);
+    const running = new Set(list.map((x) => x.id).filter(Boolean));
+    const dismissed = new Set(shared("maestro.dismissed") ?? []);
+    const recent = this.recent.filter((r) => !running.has(r.id) && !dismissed.has(r.id));
+    if (recent.length) {
+      rows.push(h_flex().id("recent-head").px(6).pt(16).pb(4).gap(6).items_center()
+        .child(div().id("recent-tog").text_size(11).text_color(t.muted)
+          .on_click((_e, cx) => { this.showRecent = !this.showRecent; cx.notify(); })
+          .child(`${this.showRecent ? "▾" : "▸"} RECENT`))
+        .child(div().text_size(11).text_color(t.dim).child(String(recent.length)))
+        .child(div().flex_1())
+        .child(div().id("recent-clear").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .on_click(() => setShared("maestro.dismissed", [...dismissed, ...recent.map((r) => r.id)].slice(-500)))
+          .child("clear")));
+      if (this.showRecent) for (const r of recent) rows.push(this.recentRow(t, r, dismissed, now));
+    }
     const counts = { blocked: 0, working: 0, done: 0 };
     for (const x of list) if (counts[x.a.status] != null) counts[x.a.status]++;
 
@@ -300,6 +337,20 @@ export default class Maestro extends View {
           .child("↗")))
       .child(div().pl(16).truncate().text_size(11).text_color(t.dim)
         .child(meta || (x.id ? "reading session…" : "not bound yet: restart Copilot to enable the status-line bridge")));
+  }
+
+  recentRow(t, r, dismissed, now) {
+    const where = place(r.cwd);
+    const resume = () => run("tab.new", { ...(focused()?.space ? { space: focused().space } : {}), ...(r.cwd ? { folder: r.cwd } : {}), argv: [...(shared("maestro.argv") ?? ["copilot", "--yolo"]), "--resume", r.id] });
+    return h_flex().id(`r-${r.id}`).px(8).py(4).gap(8).items_center().rounded(8).text_size(12)
+      .hover((st) => st.bg(t.hover))
+      .child(div().size(6).rounded(3).bg(t.idle))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(r.name))
+      .child(div().text_size(11).text_color(t.dim).child(`${where.repo ?? where.org} · ${ago(now - r.updated)} ago`))
+      .child(div().id(`res-${r.id}`).px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.raised).text_color(t.foreground))
+        .on_click(resume).child("resume"))
+      .child(div().id(`dis-${r.id}`).px(4).text_color(t.dim).hover((st) => st.text_color(t.foreground))
+        .on_click(() => setShared("maestro.dismissed", [...dismissed, r.id].slice(-500))).child("×"));
   }
 
   agentRow(t, x, r, now, depth = 0) {
