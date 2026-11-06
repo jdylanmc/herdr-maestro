@@ -1,0 +1,29 @@
+.DS_Store
+*.log
+*.tmp
+*.bak
+
+# Written into mod folders by the Herdr app; regenerated on every start.
+jsconfig.json
+*.d.ts
+*.error
+
+# Runtime and credential-bearing files never belong here.
+.env
+.env.*
+**/credentials*
+**/secrets*
+**/session.json
+**/*history*
+**/.npmrc
+**/.netrc
+**/.ssh/
+**/.aws/
+**/.azure/
+**/.copilot/
+**/.claude/
+
+# Machine-local agent instructions and working state; never committed.
+.user/
+.skill-log/
+/*--*.md
