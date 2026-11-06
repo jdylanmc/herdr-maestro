@@ -1,0 +1,12 @@
+{
+  "id": "root",
+  "type": "row",
+  "theme": { "light": "herdr-catppuccin-latte", "dark": "herdr-catppuccin" },
+  "background": "canvas",
+  "terminal_padding": [14, 12],
+  "divider": { "width": 1, "color": "border" },
+  "children": [
+    { "id": "maestro", "type": "block", "size": { "weight": 1 }, "min": 360, "content": { "mod": "maestro" } },
+    { "id": "focus", "type": "block", "size": { "weight": 1.6 }, "padding": 8, "content": { "agent": "focused" } }
+  ]
+}

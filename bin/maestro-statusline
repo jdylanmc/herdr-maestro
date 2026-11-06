@@ -1,0 +1,13 @@
+#!/bin/sh
+# Copilot statusLine.command for Herdr-Maestro: keeps the session snapshot Copilot
+# passes on stdin, keyed by the herdr-core terminal running it, and prints a short line.
+input=$(cat)
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  dir="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/maestro/terminals"
+  mkdir -p "$dir"
+  printf '%s' "$input" > "$dir/$HC_TERMINAL_ID.json.tmp" && mv "$dir/$HC_TERMINAL_ID.json.tmp" "$dir/$HC_TERMINAL_ID.json"
+fi
+flat=$(printf '%s' "$input" | tr -d '\n')
+pct=$(printf '%s' "$flat" | sed -n 's/.*"used_percentage": *\([0-9.]*\).*/\1/p')
+aic=$(printf '%s' "$flat" | sed -n 's/.*"ai_used": *{[^}]*"formatted": *"\([^"]*\)".*/\1/p')
+printf 'maestro · ctx %s%% · %s AIC\n' "${pct:-?}" "${aic:-?}"
