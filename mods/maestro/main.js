@@ -78,7 +78,11 @@ export default class Maestro extends View {
     for (const n of names) {
       if (!n.endsWith(".json")) continue;
       const addr = n.slice(0, -5);
-      if (!live.has(addr)) { this.snaps.delete(addr); continue; }
+      if (!live.has(addr)) {
+        this.snaps.delete(addr);
+        if (!terminals().some((k) => k.address === addr && k.state === "live")) await fs.unlink(`${snapDir()}/${n}`).catch(() => {});
+        continue;
+      }
       try { this.snaps.set(addr, JSON.parse(await fs.readFile(`${snapDir()}/${n}`, "utf8"))); } catch {}
     }
   }
@@ -174,6 +178,7 @@ export default class Maestro extends View {
 
   sessions() {
     const byPane = new Map(panes().map((p) => [p.pane, p]));
+    const kinds = new Map(terminals().map((k) => [k.address, k.report?.kind ?? null]));
     const mode = this.group();
     return this.live().map((a) => {
       const pane = byPane.get(a.pane);
@@ -183,7 +188,7 @@ export default class Maestro extends View {
       const cwd = snap?.cwd ?? pane?.cwd ?? a.cwd ?? null;
       const where = place(cwd);
       const key = mode === "space" ? a.space_name || "other" : mode === "org" || !where.repo ? where.org : `${where.org}/${where.repo}`;
-      return { a, pane, snap, id, s: L?.s ?? null, key };
+      return { a, pane, snap, id, s: L?.s ?? null, key, cwd, kind: a.status === "blocked" ? kinds.get(a.address) ?? null : null };
     });
   }
 
@@ -210,7 +215,7 @@ export default class Maestro extends View {
     const rows = [];
     for (const [key, items] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const worst = items.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
-      rows.push(this.groupRow(t, key, items.length, worst));
+      rows.push(this.groupRow(t, key, items.length, worst, items[0]));
       for (const x of items.sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || q.a.seq - p.a.seq)) {
         this.pushSession(t, rows, order, x, kidsOf, now, 0);
       }
@@ -248,17 +253,23 @@ export default class Maestro extends View {
     for (const k of kids) this.pushSession(t, rows, order, k, kidsOf, now, depth + 1);
   }
 
-  groupRow(t, key, n, worst) {
+  groupRow(t, key, n, worst, first) {
+    const where = first?.cwd ?? null;
+    const space = first?.a.space ?? null;
     return h_flex().id(`grp-${key}`).px(6).pt(10).pb(4).gap(6).items_center()
       .child(div().size(6).rounded(3).bg(t[worst] ?? t.idle))
       .child(div().text_size(11).text_color(t.muted).child(key.toUpperCase()))
-      .child(div().text_size(11).text_color(t.dim).child(String(n)));
+      .child(div().text_size(11).text_color(t.dim).child(String(n)))
+      .child(div().flex_1())
+      .child(div().id(`new-${key}`).px(6).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+        .on_click(() => run("tab.new", { ...(space ? { space } : {}), ...(where ? { folder: where } : {}), argv: shared("maestro.argv") ?? ["copilot", "--yolo"] }))
+        .child("+ copilot"));
   }
 
   sessionRow(t, x, now, depth = 0, workers = 0) {
     const { a, snap, s } = x;
     const finished = depth > 0 && (a.status === "done" || a.status === "idle");
-    const why = s ? attention(s) : null;
+    const why = x.kind ?? (s ? attention(s) : null);
     const name = snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.tab_name;
     const handle = a.handle && a.handle !== name ? a.handle : null;
     const model = snap?.model?.display_name ?? s?.model ?? s?.lastModel ?? null;
