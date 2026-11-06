@@ -1,0 +1,177 @@
+#!/usr/bin/env node
+// Herdr-Maestro agent CLI. Lets a Copilot session running in a Herdr terminal see its
+// peers, message them, launch and close visible workers, notify the human, and set its
+// own tags and mood. Everything goes through herdr-core (`hc`) and the Herdr app
+// (`herdr-app do`); Maestro's mod reads the files written under data/maestro/.
+
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const HOME = process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app");
+const DATA = join(HOME, "data", "maestro");
+const AGENTS = join(DATA, "agents");
+const NOTIFY = join(DATA, "notify");
+const ME = process.env.HC_TERMINAL_ID ?? null;
+const MOODS = ["happy", "focused", "thinking", "proud", "confused", "stuck", "sleepy", "celebrating"];
+const DEFAULT_ARGV = ["copilot", "--yolo"];
+
+const out = (v) => process.stdout.write(typeof v === "string" ? v + "\n" : JSON.stringify(v, null, 2) + "\n");
+function fail(msg, code = 1) { process.stderr.write(`maestro: ${msg}\n`); process.exit(code); }
+const run = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const json = (cmd, args) => JSON.parse(run(cmd, args));
+
+function writeJson(path, value) {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path + ".tmp", JSON.stringify(value, null, 1));
+  renameSync(path + ".tmp", path);
+}
+const recordOf = (t) => {
+  const p = join(AGENTS, `${t}.json`);
+  return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
+};
+const saveRecord = (t, patch) => writeJson(join(AGENTS, `${t}.json`), { ...recordOf(t), ...patch, updated: Date.now() });
+
+function needMe() {
+  if (!ME) fail("not inside a Herdr terminal (HC_TERMINAL_ID is unset)");
+  return ME;
+}
+
+// Herdr's view: which space and tab each terminal is in, plus core state.
+function world() {
+  const app = json("herdr-app", ["ls"]);
+  const where = new Map();
+  for (const s of app.spaces ?? []) for (const tab of s.tabs ?? []) for (const term of tab.terminals ?? []) {
+    where.set(term.terminal, { space: s.id, space_name: s.name, tab: tab.id, tab_name: tab.name, status: term.status ?? null, app: term.app ?? null });
+  }
+  const core = json("hc", ["ls", "--json"]).terminals ?? [];
+  return core.map((t) => {
+    const w = where.get(t.address) ?? (t.parent ? where.get(t.parent) : null) ?? {};
+    const rec = recordOf(t.address);
+    return { address: t.address, name: rec.name ?? t.name ?? null, agent: t.agent ?? null, status: t.status ?? w.status ?? null, cwd: t.cwd, space: w.space ?? null, space_name: w.space_name ?? null, tab_name: w.tab_name ?? null, parent: rec.parent ?? t.parent ?? null, tags: rec.tags ?? [], mood: rec.mood ?? null };
+  });
+}
+
+const descendants = (all, root) => {
+  const kids = new Set();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const t of all) if ((t.parent === root || kids.has(t.parent)) && !kids.has(t.address)) { kids.add(t.address); grew = true; }
+  }
+  return kids;
+};
+
+const commands = {
+  whoami() {
+    const me = needMe();
+    const self = world().find((t) => t.address === me);
+    out(self ?? { address: me });
+  },
+
+  peers(args) {
+    const me = needMe();
+    const all = world();
+    const self = all.find((t) => t.address === me);
+    const scope = args.includes("--all") ? all : all.filter((t) => t.space && t.space === self?.space);
+    out(scope.filter((t) => t.address !== me && t.agent).map(({ address, name, agent, status, space_name, tab_name, parent, tags, mood }) => ({ address, name, agent, status, space: space_name, tab: tab_name, parent, tags, mood })));
+  },
+
+  send([to, ...words]) {
+    let target = to;
+    const me = needMe();
+    if (!target || !words.length) fail("usage: maestro send <terminal> <message>");
+    const text = words.join(" ");
+    const name = recordOf(me).name ?? me;
+    const hit = world().find((t) => t.address === target || t.name === target);
+    if (hit) target = hit.address;
+    run("hc", ["send", target, `[maestro from ${me}${name !== me ? ` ${name}` : ""}] ${text}`]);
+    out({ sent: true, to: target });
+  },
+
+  spawn(args) {
+    const me = needMe();
+    const opt = { name: null, cwd: process.cwd(), task: null, argv: null };
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === "--name") opt.name = args[++i];
+      else if (a === "--cwd") opt.cwd = args[++i];
+      else if (a === "--task") opt.task = args[++i];
+      else if (a === "--") { opt.argv = args.slice(i + 1); break; }
+      else if (!opt.task) opt.task = a;
+    }
+    const self = world().find((t) => t.address === me);
+    const argv = opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])];
+    const req = { ...(self?.space ? { space: self.space } : {}), folder: opt.cwd, argv, ...(opt.name ? { name: opt.name } : {}) };
+    const made = JSON.parse(run("herdr-app", ["do", "tab.new", JSON.stringify(req)]));
+    if (made.error || !made.terminal) fail(`tab.new failed: ${made.error ?? "no terminal"}`);
+    saveRecord(made.terminal, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me });
+    out({ address: made.terminal, tab: made.tab, space: made.space, parent: me });
+  },
+
+  close([target]) {
+    const me = needMe();
+    if (!target) fail("usage: maestro close <terminal>");
+    const all = world();
+    const t = all.find((x) => x.address === target || x.name === target);
+    if (!t) fail(`no live terminal ${target}`);
+    if (!descendants(all, me).has(t.address)) fail(`denied: ${t.address} was not launched by ${me} or its workers`, 3);
+    run("herdr-app", ["do", "terminal.kill", JSON.stringify({ terminal: t.address })]);
+    out({ closed: t.address });
+  },
+
+  notify([title, ...body]) {
+    const me = needMe();
+    if (!title) fail("usage: maestro notify <title> [body]");
+    const id = `${Date.now()}-${me}`;
+    writeJson(join(NOTIFY, `${id}.json`), { from: me, title, body: body.join(" ") || null, at: Date.now() });
+    out({ queued: id });
+  },
+
+  tag([op, ...tags]) {
+    const me = needMe();
+    const cur = new Set(recordOf(me).tags ?? []);
+    if (op === "add") tags.forEach((x) => cur.add(x.toLowerCase()));
+    else if (op === "rm") tags.forEach((x) => cur.delete(x.toLowerCase()));
+    else if (op === "set") { cur.clear(); tags.forEach((x) => cur.add(x.toLowerCase())); }
+    else if (op !== "ls") fail("usage: maestro tag add|rm|set|ls [tags...]");
+    if (op !== "ls") saveRecord(me, { tags: [...cur].slice(0, 8) });
+    out([...cur]);
+  },
+
+  mood([m]) {
+    const me = needMe();
+    if (!m) { out({ mood: recordOf(me).mood ?? null, choices: MOODS }); return; }
+    if (m === "clear") { saveRecord(me, { mood: null }); out({ mood: null }); return; }
+    if (!MOODS.includes(m)) fail(`mood must be one of: ${MOODS.join(", ")}`);
+    saveRecord(me, { mood: m, mood_at: Date.now() });
+    out({ mood: m });
+  },
+
+  name([n]) {
+    const me = needMe();
+    saveRecord(me, { name: n ?? null });
+    out({ name: n ?? null });
+  },
+
+  help() {
+    out(`maestro — coordinate Copilot agents in Herdr
+
+  maestro whoami                       this terminal, its space, parent, tags, mood
+  maestro peers [--all]                agents in this space (or everywhere)
+  maestro send <t> <message>           message another agent (fire and forget)
+  maestro spawn [--name n] [--cwd d] [--task text | -- argv...]
+                                       open a visible Copilot worker in a new tab of this space
+  maestro close <t>                    close a worker this agent (or its workers) launched
+  maestro notify <title> [body]        show the human a Herdr toast that jumps here
+  maestro tag add|rm|set|ls [tags]     this agent's own tags
+  maestro mood <${MOODS.join("|")}|clear>
+  maestro name <short name>            label shown in Maestro`);
+  },
+};
+
+const [cmd = "help", ...rest] = process.argv.slice(2);
+const fn = commands[cmd] ?? commands[cmd.replace(/^--?/, "")];
+if (!fn) fail(`unknown command ${cmd}; see maestro help`);
+try { fn(rest); } catch (e) { fail(e.stderr?.toString().trim() || e.message); }

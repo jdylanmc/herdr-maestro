@@ -4,9 +4,9 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, focused } from "herdr";
+import { agents, terminals, panes, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
 import * as fs from "fs/promises";
-import { emptySession, applyLines, treeRows, attention } from "./log.js";
+import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 
 const MAX_TAIL = 8_000_000;
 const RECENT_MS = 24 * 3600_000;
@@ -20,7 +20,19 @@ const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const GLYPH = { done: "✓", failed: "✗", cancelled: "⊘" };
 const SPIN = ["◐", "◓", "◑", "◒"];
 
-const snapDir = () => `${appHome()}/data/maestro/terminals`;
+const dataDir = () => `${appHome()}/data/maestro`;
+const snapDir = () => `${dataDir()}/terminals`;
+const agentDir = () => `${dataDir()}/agents`;
+const notifyDir = () => `${dataDir()}/notify`;
+const MOOD = { happy: "😊", focused: "🎯", thinking: "🤔", proud: "😎", confused: "😕", stuck: "🧱", sleepy: "😴", celebrating: "🎉" };
+const DERIVED = { working: "focused", blocked: "stuck", done: "proud", idle: "sleepy" };
+const BOARD = [
+  { id: "blocked", label: "Waiting on you" },
+  { id: "working", label: "Working" },
+  { id: "failed", label: "Failed" },
+  { id: "done", label: "Finished" },
+  { id: "idle", label: "Idle" },
+];
 const sessionRoot = () => `${home()}/.copilot/session-state`;
 
 // ~/git/<org>/<repo>/… or ~/git/_opensource/<org>/<repo>/…; else the folder's own name.
@@ -54,13 +66,23 @@ export default class Maestro extends View {
     this.collapsed = new Set(); // terminal addresses whose subagent tree is folded
     this.recent = [];           // { id, name, cwd, updated } of sessions not running
     this.showRecent = true;
+    this.records = new Map();   // terminal address -> agent-written record (parent, tags, mood, name)
+    this.board = props()?.view === "board";
     cx.spawn(async (cx) => {
-      await fs.mkdir(snapDir(), { recursive: true }).catch(() => {});
+      for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
       await this.refresh();
       cx.notify();
       for (;;) {
-        await watchFolder(snapDir());
+        await watchFolder(dataDir());
         await this.refresh();
+        cx.notify();
+      }
+    });
+    if (!this.board) cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "board") this.openBoard();
+        else if (c === "tags") this.openTags();
         cx.notify();
       }
     });
@@ -71,9 +93,40 @@ export default class Maestro extends View {
   }
 
   async refresh() {
+    await this.loadRecords();
+    if (!this.board) await this.pumpNotifications();
     await this.loadSnaps();
     await this.bindByAncestry();
     await this.tailAll();
+  }
+
+  async loadRecords() {
+    let names = [];
+    try { names = await fs.readdir(agentDir()); } catch { return; }
+    const live = new Set(terminals().filter((k) => k.state === "live").map((k) => k.address));
+    const next = new Map();
+    for (const n of names) {
+      if (!n.endsWith(".json")) continue;
+      const addr = n.slice(0, -5);
+      if (!live.has(addr)) { await fs.unlink(`${agentDir()}/${n}`).catch(() => {}); continue; }
+      try { next.set(addr, JSON.parse(await fs.readFile(`${agentDir()}/${n}`, "utf8"))); } catch {}
+    }
+    this.records = next;
+  }
+
+  // Agents ask for the human's attention with `maestro notify`; each request becomes one toast.
+  async pumpNotifications() {
+    let names = [];
+    try { names = await fs.readdir(notifyDir()); } catch { return; }
+    for (const n of names.filter((x) => x.endsWith(".json")).sort()) {
+      const path = `${notifyDir()}/${n}`;
+      try {
+        const m = JSON.parse(await fs.readFile(path, "utf8"));
+        const who = this.records.get(m.from)?.name ?? m.from;
+        notify({ title: `${who}: ${String(m.title).slice(0, 120)}`, body: m.body ? String(m.body).slice(0, 400) : undefined, level: "info", timeout: 8000, action: { name: "agent.focus", args: { terminal: m.from } } });
+      } catch {}
+      await fs.unlink(path).catch(() => {});
+    }
   }
 
   async loadSnaps() {
@@ -195,6 +248,11 @@ export default class Maestro extends View {
       const status = k.status === "error" ? "blocked" : ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : "idle";
       shown.push({ address: k.address, pane: null, space: parent?.space ?? null, space_name: parent?.space_name ?? "", tab_name: k.name ?? k.address, status, app: "copilot", title: k.title || k.name || k.address, handle: k.name ?? null, seq: 0, focused: false, parent: k.parent ?? null, cwd: k.cwd });
     }
+    for (const a of shown) {
+      const r = this.records.get(a.address);
+      if (r?.parent) a.parent = r.parent;
+      if (r?.name) a.handle = r.name;
+    }
     return shown;
   }
 
@@ -210,7 +268,11 @@ export default class Maestro extends View {
       const cwd = snap?.cwd ?? pane?.cwd ?? a.cwd ?? null;
       const where = place(cwd);
       const key = mode === "space" ? a.space_name || "other" : mode === "org" || !where.repo ? where.org : `${where.org}/${where.repo}`;
-      return { a, pane, snap, id, s: L?.s ?? null, key, cwd, kind: a.status === "blocked" ? kinds.get(a.address) ?? null : null };
+      const s = L?.s ?? null;
+      const rec = this.records.get(a.address) ?? {};
+      const failed = a.status !== "working" && a.status !== "blocked" && s?.error ? true : false;
+      const tagKey = id ?? a.address;
+      return { a, pane, snap, id, s, key, cwd, rec, failed, tagKey, userTags: (shared("maestro.tags") ?? {})[tagKey] ?? [], branch: pane?.branch ?? null, kind: a.status === "blocked" ? kinds.get(a.address) ?? null : null };
     });
   }
 
@@ -218,6 +280,7 @@ export default class Maestro extends View {
     const t = theme();
     const now = Date.now();
     const list = this.sessions();
+    if (this.board) return this.renderBoard(t, list, now);
     const byAddr = new Set(list.map((x) => x.a.address));
     const kidsOf = new Map();
     for (const x of list) {
@@ -268,7 +331,10 @@ export default class Maestro extends View {
         .child(div().flex_1())
         .when(counts.blocked > 0, (el) => el.child(div().text_color(t.blocked).child(`${counts.blocked} need you`)))
         .when(counts.working > 0, (el) => el.child(div().text_color(t.working).child(`${counts.working} working`)))
-        .when(counts.done > 0, (el) => el.child(div().text_color(t.done).child(`${counts.done} done`))))
+        .when(counts.done > 0, (el) => el.child(div().text_color(t.done).child(`${counts.done} done`)))
+        .child(div().id("open-board").px(8).py(2).rounded(6).text_size(12).text_color(t.muted).hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .on_click(() => this.openBoard())
+          .child("Board")))
       .child(h_flex().px(12).pb(8).gap(4).children(GROUPS.map((g) => {
         const on = g.id === this.group();
         return div().id(`g-${g.id}`).px(10).py(3).rounded(6).text_size(12)
@@ -278,7 +344,109 @@ export default class Maestro extends View {
       })))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(8).pb(8).overflow_y_scrollbar()
         .when(list.length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No Copilot sessions running.")))
-        .children(rows));
+        .children(rows))
+      .child(this.footer(t, list, now));
+  }
+
+  openBoard() {
+    openOverlay({ kind: "window", mod: "maestro", props: { view: "board" }, key: "maestro-board", width: 1180, height: 640 });
+  }
+
+  openTags() {
+    const f = focused();
+    const x = this.sessions().find((y) => y.a.address === f?.terminal);
+    if (x) openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: x.snap?.session_name ?? x.a.address } });
+  }
+
+  // Pinned details for the focused session.
+  footer(t, list, now) {
+    const f = focused();
+    const x = list.find((y) => y.a.address === f?.terminal) ?? list.find((y) => y.a.focused);
+    if (!x) return div();
+    const { a, snap, s } = x;
+    const line = (k, v) => v == null || v === "" ? null : h_flex().gap(8).text_size(11)
+      .child(div().w(64).text_color(t.dim).child(k)).child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(String(v)));
+    const sched = s ? [...s.schedules.values()] : [];
+    const cost = snap?.cost;
+    const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
+    return v_flex().id("maestro-footer").mx(8).mb(8).p(10).gap(3).rounded(8).bg(t.surface).border_1().border_color(t.border)
+      .child(h_flex().gap(8).items_center()
+        .child(div().text_size(18).child(this.moodGlyph(x)))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address))
+        .child(div().id("edit-tags").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .on_click(() => openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: snap?.session_name ?? a.address } }))
+          .child("Edit tags…")))
+      .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
+      .children([
+        line("terminal", `${a.address}${a.parent ? ` · child of ${a.parent}` : ""}`),
+        line("session", x.id),
+        line("folder", x.cwd ? x.cwd.replace(home(), "~") : null),
+        line("branch", x.branch),
+        line("usage", cost ? `${snap.ai_used?.formatted ?? "?"} AIC · ${cost.total_premium_requests ?? 0} premium · +${cost.total_lines_added ?? 0} −${cost.total_lines_removed ?? 0}` : null),
+        line("context", snap?.context_window ? `${snap.context_window.used_percentage}% of ${Math.round((snap.context_window.context_window_size ?? 0) / 1000)}k` : null),
+      ].filter(Boolean))
+      .when(sched.length > 0, (el) => el.child(v_flex().pt(4).gap(2)
+        .child(div().text_size(11).text_color(t.dim).child(`BEATS ${sched.length}`))
+        .children(sched.map((b) => {
+          const n = nextRun(b, now);
+          return h_flex().id(`beat-${b.id}`).gap(6).text_size(11)
+            .child(div().text_color(t.working).child("⟳"))
+            .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(b.prompt))
+            .child(div().text_color(t.dim).child([cadence(b), b.runs ? `${b.runs} runs` : null, n ? `next ${n > now ? "in " + ago(n - now) : "due"}` : null].filter(Boolean).join(" · ")));
+        }))));
+  }
+
+  moodGlyph(x) {
+    const m = x.rec.mood ?? DERIVED[x.failed ? "blocked" : x.a.status] ?? "sleepy";
+    return MOOD[m] ?? "·";
+  }
+
+  tagChips(t, tags) {
+    return h_flex().flex_wrap().gap(4).children(tags.slice(0, 6).map(({ g, mine }) =>
+      div().px(5).rounded(4).text_size(10).bg(mine ? t.selected : t.raised).text_color(mine ? t.foreground : t.muted).child(mine ? g : `${g}·agent`)));
+  }
+
+  boardColumn(x) {
+    if (x.a.status === "blocked") return "blocked";
+    if (x.failed) return "failed";
+    return x.a.status;
+  }
+
+  renderBoard(t, list, now) {
+    const cols = BOARD.map((c) => ({ ...c, items: list.filter((x) => this.boardColumn(x) === c.id) }));
+    return v_flex().id("maestro-board").size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
+      .child(h_flex().px(16).py(12).gap(10).items_center().bg(t.chrome)
+        .child(div().text_size(16).child("Maestro board"))
+        .child(div().text_color(t.dim).child(`${list.length} sessions`))
+        .child(div().flex_1())
+        .child(div().id("board-close").px(8).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click(() => closeOverlay(props()?.overlay)).child("×")))
+      .child(h_flex().id("board-cols").flex_1().min_h(0).p(12).gap(10).items_start().children(cols.map((c) =>
+        v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(8).gap(8).rounded(10).bg(t.chrome).overflow_y_scrollbar()
+          .child(h_flex().gap(6).items_center().pb(2)
+            .child(div().size(8).rounded(4).bg(c.id === "failed" ? t.blocked : t[c.id] ?? t.idle))
+            .child(div().text_size(12).text_color(t.muted).child(c.label))
+            .child(div().text_size(11).text_color(t.dim).child(String(c.items.length))))
+          .children(c.items.map((x) => this.card(t, x, now))))));
+  }
+
+  card(t, x, now) {
+    const { a, snap, s } = x;
+    const why = x.kind ?? (s ? attention(s) : null);
+    const running = s ? treeRows(s, now, KEEP_FINISHED_MS).filter((r) => r.status === "running").length : 0;
+    const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
+    return v_flex().id(`card-${a.address}`).p(8).gap(4).rounded(8).bg(t.surface).border_1().border_color(a.focused ? t.accent : t.border)
+      .hover((st) => st.bg(t.hover))
+      .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
+      .child(h_flex().gap(6).items_center()
+        .child(div().child(this.moodGlyph(x)))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address)))
+      .child(div().truncate().text_size(11).text_color(t.dim).child([x.key, snap?.context_window && `ctx ${snap.context_window.used_percentage}%`, snap?.ai_used && `${snap.ai_used.formatted} AIC`].filter(Boolean).join(" · ")))
+      .when(Boolean(why) || running > 0, (el) => el.child(h_flex().gap(6).text_size(11)
+        .when(Boolean(why), (e2) => e2.child(div().px(5).rounded(4).bg(t.blocked).text_color(t.background).child(why)))
+        .when(running > 0, (e2) => e2.child(div().text_color(t.working).child(`${running} subagent${running > 1 ? "s" : ""} running`)))))
+      .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
   }
 
   pushSession(t, rows, order, x, kidsOf, now, depth) {
@@ -323,7 +491,8 @@ export default class Maestro extends View {
       .bg(a.focused ? t.selected : t.chrome).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
       .child(h_flex().gap(8).items_center()
-        .child(div().size(8).rounded(4).bg(t[a.status] ?? t.idle))
+        .child(div().size(8).rounded(4).bg(x.failed ? t.blocked : t[a.status] ?? t.idle))
+        .child(div().text_size(12).child(this.moodGlyph(x)))
         .when(Boolean(handle), (el) => el.child(div().px(5).rounded(4).text_size(11).bg(t.raised).text_color(t.muted).child(handle)))
         .child(div().flex_1().min_w(0).truncate().text_size(depth ? 12 : 13).child(name))
         .when(Boolean(why), (el) => el.child(div().px(6).rounded(4).text_size(11).bg(t.blocked).text_color(t.background).child(why)))
@@ -335,6 +504,9 @@ export default class Maestro extends View {
           .on_mouse_down("left", stop)
           .on_click((_e, cx) => { cx.stop_propagation(); if (!a.pane) { run("terminal.peek", { terminal: a.address }); return; } run("layout.switch", { name: shared("maestro.return") ?? "catppuccin" }); run("pane.focus", { pane: a.pane }); })
           .child("↗")))
+      .when(x.userTags.length > 0 || (x.rec.tags ?? []).length > 0 || (s?.schedules.size ?? 0) > 0, (el) => el.child(h_flex().pl(16).gap(4)
+        .child(this.tagChips(t, [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))]))
+        .when((s?.schedules.size ?? 0) > 0, (e2) => e2.child(div().text_size(10).text_color(t.working).child(`⟳ ${s.schedules.size}`)))))
       .child(div().pl(16).truncate().text_size(11).text_color(t.dim)
         .child(meta || (x.id ? "reading session…" : "not bound yet: restart Copilot to enable the status-line bridge")));
   }

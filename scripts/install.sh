@@ -15,6 +15,10 @@ link() {
 }
 
 link "$ROOT/mods/maestro" "$HERDR/mods/maestro"
+link "$ROOT/mods/maestro-tags" "$HERDR/mods/maestro-tags"
+mkdir -p "$HOME/.local/bin" "$COPILOT/skills"
+link "$ROOT/bin/maestro" "$HOME/.local/bin/maestro"
+link "$ROOT/skills/herdr-maestro" "$COPILOT/skills/herdr-maestro"
 link "$ROOT/layouts/maestro.json" "$HERDR/layouts/maestro.json"
 
 python3 - "$COPILOT/settings.json" "$ROOT/bin/maestro-statusline" "$HERDR/keys.json" "$KEY" "$RETURN_LAYOUT" <<'PY'
@@ -44,10 +48,13 @@ def status_line(d):
 def bindings(d):
     d.setdefault("global", {})[key] = f"layout.switch:maestro"
     d.setdefault("layout:maestro", {})[key] = f"layout.switch:{back}"
+    d["layout:maestro"].setdefault("cmd-shift-b", "maestro.board")
+    d["layout:maestro"].setdefault("cmd-shift-t", "maestro.tags")
 
 print("copilot statusLine:", "updated" if edit(settings, status_line) else "unchanged")
 print("herdr keys:", "updated" if edit(keys, bindings) else "unchanged")
 PY
 
 herdr-app check "$ROOT/mods/maestro"
+herdr-app check "$ROOT/mods/maestro-tags"
 echo "Maestro installed. $KEY toggles the maestro layout. Restart Copilot sessions to enable the status-line bridge."

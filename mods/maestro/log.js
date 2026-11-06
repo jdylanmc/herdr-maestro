@@ -1,9 +1,9 @@
 // Folds a Copilot session's events.jsonl into what Maestro shows. Pure: no herdr imports.
 
-const WANTED = /"type":"(subagent\.(started|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error)|assistant\.turn_(start|end)|abort)"/;
+const WANTED = /"type":"(subagent\.(started|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
 
 export function emptySession() {
-  return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, started: null, turnStart: null, error: null };
+  return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, schedules: new Map(), lastPromptAt: null, started: null, turnStart: null, error: null };
 }
 
 // Model calls are huge lines; read their model and effort without parsing them.
@@ -34,6 +34,17 @@ export function applyEvent(s, e) {
   switch (e.type) {
     case "session.start": s.started = Date.parse(d.startTime) || t; break;
     case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; s.effort = d.reasoningEffort ?? s.effort; break;
+    case "session.schedule_created":
+      if (d.id == null) break;
+      s.schedules.set(d.id, { id: d.id, prompt: d.displayPrompt || d.prompt || "", intervalMs: d.intervalMs ?? null, cron: d.cron ?? null, at: d.at ?? null, recurring: d.recurring !== false, selfPaced: !!d.selfPaced, nextRunAt: d.at ?? null, runs: 0, created: t });
+      break;
+    case "session.schedule_cancelled": s.schedules.delete(d.id); break;
+    case "session.schedule_rearmed": { const x = s.schedules.get(d.id); if (x) x.nextRunAt = d.nextRunAt ?? x.nextRunAt; break; }
+    case "user.message":
+      if (e.agentId) break;
+      s.lastPromptAt = t;
+      { const m = /^schedule-(\d+)$/.exec(String(d.source ?? "")); const x = m && (s.schedules.get(Number(m[1])) ?? s.schedules.get(m[1])); if (x) { x.runs++; x.lastRun = t; } }
+      break;
     case "session.error": s.error = { type: d.errorType ?? "error", at: t }; break;
     case "subagent.started":
       if (!e.agentId) break;
@@ -86,4 +97,26 @@ export function attention(s) {
   if (s.asks.size) return "question";
   if (s.error) return "error";
   return null;
+}
+
+// Best-effort next run: rearm/one-shot time if known, else last run (or creation) plus interval.
+export function nextRun(x, now) {
+  if (x.nextRunAt) return x.nextRunAt;
+  if (x.intervalMs) {
+    let n = (x.lastRun ?? x.created ?? now) + x.intervalMs;
+    while (n < now) n += x.intervalMs;
+    return n;
+  }
+  return null;
+}
+
+export function cadence(x) {
+  if (x.cron) return `cron ${x.cron}`;
+  if (x.selfPaced) return "self-paced";
+  if (x.intervalMs) {
+    const m = Math.round(x.intervalMs / 60000);
+    return m >= 60 && m % 60 === 0 ? `every ${m / 60}h` : m >= 1 ? `every ${m}m` : `every ${Math.round(x.intervalMs / 1000)}s`;
+  }
+  if (x.at) return "once";
+  return "";
 }
