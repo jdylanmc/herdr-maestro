@@ -8,12 +8,23 @@ export function emptySession() {
 
 // Model calls are huge lines; read their model and effort without parsing them.
 const CALL = /"type":"model\.model_call_success"/;
+// Usage records name the main agent's model and effort for each call; side models
+// (titles, summaries) appear only in model calls.
+const USAGE = /"type":"session\.usage_record"/;
+const USE_MODEL = /"model":"([^"]+)"/;
 const CALL_EFFORT = /"reasoningEffort":"([^"]+)"/;
 const CALL_MODEL = /"modelDisplayName":"([^"]+)"/;
 
 export function applyLines(s, text) {
   for (const line of text.split("\n")) {
     if (!line) continue;
+    if (USAGE.test(line)) {
+      if (line.includes('"agentId":')) continue;
+      s.lastModel = line.match(USE_MODEL)?.[1] ?? s.lastModel;
+      s.effort = line.match(CALL_EFFORT)?.[1] ?? s.effort;
+      s.effortSet = true;
+      continue;
+    }
     if (CALL.test(line)) {
       if (line.includes('"agentId":')) continue;
       if (/utility/i.test(line.match(CALL_MODEL)?.[1] ?? "")) continue;

@@ -54,7 +54,7 @@ Copilot CLI 1.0.107, 2026-11-06.
 
 ### G-08 - No session id or metrics over OSC 7501
 
-**Shipped:** `statusLine.command` bridge. Its JSON payload is undocumented and lacks reasoning effort (read from `model.model_call_success` / `session.model_change` instead).
+**Shipped:** `statusLine.command` bridge. Its JSON payload is undocumented and lacks reasoning effort (read from root `session.usage_record` and `session.model_change` instead; `model.model_call_success` only logs side models).
 **Closes with:** documented session id and usage fields in the status report.
 
 ### G-09 - Schedules: no persisted next run or run count
