@@ -26,6 +26,11 @@ const snapDir = () => `${dataDir()}/terminals`;
 const agentDir = () => `${dataDir()}/agents`;
 const notifyDir = () => `${dataDir()}/notify`;
 const MOOD = { happy: "😊", focused: "🎯", thinking: "🤔", proud: "😎", confused: "😕", stuck: "🧱", sleepy: "😴", celebrating: "🎉" };
+// Each mood is a short native animation; agents pick moods with `maestro mood`.
+const PET = {
+  happy: ["😊", "😄"], focused: ["🎯", "🧐"], thinking: ["🤔", "💭"], proud: ["😎", "✨"],
+  confused: ["😕", "❓"], stuck: ["🧱", "😣"], sleepy: ["😴", "💤"], celebrating: ["🎉", "🥳"],
+};
 const DERIVED = { working: "focused", blocked: "stuck", done: "proud", idle: "sleepy" };
 const BOARD = [
   { id: "blocked", label: "Waiting on you" },
@@ -395,12 +400,20 @@ export default class Maestro extends View {
     const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
     return v_flex().id("maestro-footer").mx(8).mb(8).p(10).gap(3).rounded(8).bg(t.surface).border_1().border_color(t.border)
       .child(h_flex().gap(8).items_center()
-        .child(div().text_size(18).child(this.moodGlyph(x)))
+        .child(this.pet(x, 18))
         .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address))
         .child(div().id("edit-tags").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
           .on_click(() => openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: snap?.session_name ?? a.address } }))
           .child("Edit tags…")))
       .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
+      .child(h_flex().gap(2).children(Object.keys(PET).map((m) => div().id(`mood-${m}`).px(2).rounded(4).text_size(12)
+        .bg(this.mood(x) === m ? t.selected : t.surface).hover((st) => st.bg(t.hover))
+        .on_click(() => {
+          const p = { ...(shared("maestro.preview") ?? {}) };
+          if (p[a.address] === m) delete p[a.address]; else p[a.address] = m;
+          setShared("maestro.preview", p);
+        })
+        .child(PET[m][0]))))
       .children([
         line("terminal", `${a.address}${a.parent ? ` · child of ${a.parent}` : ""}`),
         line("session", x.id),
@@ -420,9 +433,18 @@ export default class Maestro extends View {
         }))));
   }
 
+  mood(x) {
+    return (shared("maestro.preview") ?? {})[x.a.address] ?? x.rec.mood ?? DERIVED[x.failed ? "blocked" : x.a.status] ?? "sleepy";
+  }
+
   moodGlyph(x) {
-    const m = x.rec.mood ?? DERIVED[x.failed ? "blocked" : x.a.status] ?? "sleepy";
-    return MOOD[m] ?? "·";
+    return MOOD[this.mood(x)] ?? "·";
+  }
+
+  pet(x, size = 13) {
+    const frames = PET[this.mood(x)] ?? ["·"];
+    const lively = x.a.status === "working" || x.a.status === "blocked" || (shared("maestro.preview") ?? {})[x.a.address];
+    return lively ? div().text_size(size).frames(frames, 700) : div().text_size(size).child(frames[0]);
   }
 
   tagChips(t, tags) {
@@ -464,7 +486,7 @@ export default class Maestro extends View {
       .hover((st) => st.bg(t.hover))
       .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
       .child(h_flex().gap(6).items_center()
-        .child(div().child(this.moodGlyph(x)))
+        .child(this.pet(x, 13))
         .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address)))
       .child(div().truncate().text_size(11).text_color(t.dim).child([x.key, snap?.context_window && `ctx ${snap.context_window.used_percentage}%`, snap?.ai_used && `${snap.ai_used.formatted} AIC`].filter(Boolean).join(" · ")))
       .when(Boolean(why) || running > 0, (el) => el.child(h_flex().gap(6).text_size(11)
@@ -520,7 +542,7 @@ export default class Maestro extends View {
       .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
       .child(h_flex().gap(8).items_center()
         .child(div().size(8).rounded(4).bg(x.failed ? t.blocked : t[a.status] ?? t.idle))
-        .child(div().text_size(12).child(this.moodGlyph(x)))
+        .child(this.pet(x, 12))
         .when(Boolean(handle), (el) => el.child(div().px(5).rounded(4).text_size(11).bg(t.raised).text_color(t.muted).child(handle)))
         .child(div().flex_1().min_w(0).truncate().text_size(depth ? 12 : 13).child(name))
         .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(6).rounded(4).text_size(11).bg(t.blocked).text_color(t.background)

@@ -17,7 +17,7 @@ export function applyLines(s, text) {
     if (CALL.test(line)) {
       if (line.includes('"agentId":')) continue;
       if (/utility/i.test(line.match(CALL_MODEL)?.[1] ?? "")) continue;
-      s.effort = line.match(CALL_EFFORT)?.[1] ?? s.effort;
+      if (!s.effortSet) s.effort = line.match(CALL_EFFORT)?.[1] ?? s.effort;
       continue;
     }
     if (!WANTED.test(line)) continue;
@@ -33,7 +33,7 @@ export function applyEvent(s, e) {
   const t = Date.parse(e.timestamp) || null;
   switch (e.type) {
     case "session.start": s.started = Date.parse(d.startTime) || t; break;
-    case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; s.effort = d.reasoningEffort ?? s.effort; break;
+    case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; if (d.reasoningEffort) { s.effort = d.reasoningEffort; s.effortSet = true; } break;
     case "session.schedule_created":
       if (d.id == null) break;
       s.schedules.set(d.id, { id: d.id, prompt: d.displayPrompt || d.prompt || "", intervalMs: d.intervalMs ?? null, cron: d.cron ?? null, at: d.at ?? null, recurring: d.recurring !== false, selfPaced: !!d.selfPaced, nextRunAt: d.at ?? null, runs: 0, created: t });
