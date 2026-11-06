@@ -6,9 +6,21 @@ export function emptySession() {
   return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, started: null, turnStart: null, error: null };
 }
 
+// Model calls are huge lines; read their model and effort without parsing them.
+const CALL = /"type":"model\.model_call_success"/;
+const CALL_EFFORT = /"reasoningEffort":"([^"]+)"/;
+const CALL_MODEL = /"modelDisplayName":"([^"]+)"/;
+
 export function applyLines(s, text) {
   for (const line of text.split("\n")) {
-    if (!line || !WANTED.test(line)) continue;
+    if (!line) continue;
+    if (CALL.test(line)) {
+      if (line.includes('"agentId":')) continue;
+      s.effort = line.match(CALL_EFFORT)?.[1] ?? s.effort;
+      s.lastModel = line.match(CALL_MODEL)?.[1] ?? s.lastModel;
+      continue;
+    }
+    if (!WANTED.test(line)) continue;
     let e;
     try { e = JSON.parse(line); } catch { continue; }
     applyEvent(s, e);
@@ -21,7 +33,7 @@ export function applyEvent(s, e) {
   const t = Date.parse(e.timestamp) || null;
   switch (e.type) {
     case "session.start": s.started = Date.parse(d.startTime) || t; break;
-    case "session.model_change": s.model = d.newModel ?? s.model; s.effort = d.reasoningEffort ?? s.effort; break;
+    case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; s.effort = d.reasoningEffort ?? s.effort; break;
     case "session.error": s.error = { type: d.errorType ?? "error", at: t }; break;
     case "subagent.started":
       if (!e.agentId) break;

@@ -167,7 +167,7 @@ export default class Maestro extends View {
       if ((k.report?.app ?? k.agent) !== "copilot") continue;
       const parent = byAddr.get(k.parent);
       const status = k.status === "error" ? "blocked" : ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : "idle";
-      shown.push({ address: k.address, pane: null, space_name: parent?.space_name ?? "", tab_name: k.name ?? k.address, status, app: "copilot", title: k.name ?? k.address, seq: 0, focused: false, parent: k.parent, cwd: k.cwd });
+      shown.push({ address: k.address, pane: null, space: parent?.space ?? null, space_name: parent?.space_name ?? "", tab_name: k.name ?? k.address, status, app: "copilot", title: k.title || k.name || k.address, handle: k.name ?? null, seq: 0, focused: false, parent: k.parent ?? null, cwd: k.cwd });
     }
     return shown;
   }
@@ -191,8 +191,18 @@ export default class Maestro extends View {
     const t = theme();
     const now = Date.now();
     const list = this.sessions();
-    const groups = new Map();
+    const byAddr = new Set(list.map((x) => x.a.address));
+    const kidsOf = new Map();
     for (const x of list) {
+      const p = x.a.parent;
+      if (p && byAddr.has(p)) {
+        if (!kidsOf.has(p)) kidsOf.set(p, []);
+        kidsOf.get(p).push(x);
+      }
+    }
+    const roots = list.filter((x) => !(x.a.parent && byAddr.has(x.a.parent)));
+    const groups = new Map();
+    for (const x of roots) {
       if (!groups.has(x.key)) groups.set(x.key, []);
       groups.get(x.key).push(x);
     }
@@ -202,11 +212,7 @@ export default class Maestro extends View {
       const worst = items.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
       rows.push(this.groupRow(t, key, items.length, worst));
       for (const x of items.sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || q.a.seq - p.a.seq)) {
-        order.push(x.a.address);
-        rows.push(this.sessionRow(t, x, now));
-        if (x.s && !this.collapsed.has(x.a.address)) {
-          for (const r of treeRows(x.s, now, KEEP_FINISHED_MS)) rows.push(this.agentRow(t, x, r, now));
-        }
+        this.pushSession(t, rows, order, x, kidsOf, now, 0);
       }
     }
     setAgentOrder(order);
@@ -233,6 +239,15 @@ export default class Maestro extends View {
         .children(rows));
   }
 
+  pushSession(t, rows, order, x, kidsOf, now, depth) {
+    order.push(x.a.address);
+    rows.push(this.sessionRow(t, x, now, depth, (kidsOf.get(x.a.address) ?? []).length));
+    if (this.collapsed.has(x.a.address)) return;
+    if (x.s) for (const r of treeRows(x.s, now, KEEP_FINISHED_MS)) rows.push(this.agentRow(t, x, r, now, depth));
+    const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
+    for (const k of kids) this.pushSession(t, rows, order, k, kidsOf, now, depth + 1);
+  }
+
   groupRow(t, key, n, worst) {
     return h_flex().id(`grp-${key}`).px(6).pt(10).pb(4).gap(6).items_center()
       .child(div().size(6).rounded(3).bg(t[worst] ?? t.idle))
@@ -240,26 +255,29 @@ export default class Maestro extends View {
       .child(div().text_size(11).text_color(t.dim).child(String(n)));
   }
 
-  sessionRow(t, x, now) {
+  sessionRow(t, x, now, depth = 0, workers = 0) {
     const { a, snap, s } = x;
+    const finished = depth > 0 && (a.status === "done" || a.status === "idle");
     const why = s ? attention(s) : null;
     const name = snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.tab_name;
+    const handle = a.handle && a.handle !== name ? a.handle : null;
     const model = snap?.model?.display_name ?? s?.model ?? s?.lastModel ?? null;
     const effort = s?.effort ?? null;
     const ctx = snap?.context_window?.used_percentage;
     const aic = snap?.ai_used?.formatted;
     const turn = s?.turnStart && a.status === "working" ? ago(now - s.turnStart) : null;
     const up = snap?.cost?.total_duration_ms;
-    const meta = [model && (effort ? `${model} · ${effort}` : model), ctx != null && `ctx ${ctx}%`, aic && `${aic} AIC`, turn && `turn ${turn}`, up != null && `up ${ago(up)}`].filter(Boolean).join(" · ");
-    const kids = s ? treeRows(s, now, KEEP_FINISHED_MS).length : 0;
+    const meta = [model && (effort && !model.includes(" · ") ? `${model} · ${effort}` : model), ctx != null && `ctx ${ctx}%`, aic && `${aic} AIC`, turn && `turn ${turn}`, up != null && `up ${ago(up)}`].filter(Boolean).join(" · ");
+    const kids = (s ? treeRows(s, now, KEEP_FINISHED_MS).length : 0) + workers;
     const open = !this.collapsed.has(a.address);
     const stop = (_e, cx) => cx.stop_propagation();
-    return v_flex().id(`s-${a.address}`).px(8).py(6).gap(2).rounded(8)
+    return v_flex().id(`s-${a.address}`).ml(depth * 16).px(8).py(depth ? 4 : 6).gap(2).rounded(8).opacity(finished ? 0.55 : 1)
       .bg(a.focused ? t.selected : t.chrome).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
       .child(h_flex().gap(8).items_center()
         .child(div().size(8).rounded(4).bg(t[a.status] ?? t.idle))
-        .child(div().flex_1().min_w(0).truncate().child(name))
+        .when(Boolean(handle), (el) => el.child(div().px(5).rounded(4).text_size(11).bg(t.raised).text_color(t.muted).child(handle)))
+        .child(div().flex_1().min_w(0).truncate().text_size(depth ? 12 : 13).child(name))
         .when(Boolean(why), (el) => el.child(div().px(6).rounded(4).text_size(11).bg(t.blocked).text_color(t.background).child(why)))
         .when(kids > 0, (el) => el.child(div().id(`tog-${a.address}`).px(4).text_color(t.dim).text_size(11)
           .on_mouse_down("left", stop)
@@ -273,11 +291,11 @@ export default class Maestro extends View {
         .child(meta || (x.id ? "reading session…" : "not bound yet: restart Copilot to enable the status-line bridge")));
   }
 
-  agentRow(t, x, r, now) {
+  agentRow(t, x, r, now, depth = 0) {
     const running = r.status === "running";
     const color = running ? t.working : r.status === "failed" ? t.blocked : r.status === "cancelled" ? t.dim : t.done;
     const glyph = running ? div().text_color(color).frames(SPIN, 150) : div().text_color(color).child(GLYPH[r.status] ?? "·");
-    return h_flex().id(`a-${x.a.address}-${r.id}`).pl(24 + r.depth * 14).pr(8).py(1).gap(6).items_center().text_size(12)
+    return h_flex().id(`a-${x.a.address}-${r.id}`).pl(24 + depth * 16 + r.depth * 14).pr(8).py(1).gap(6).items_center().text_size(12)
       .child(glyph)
       .child(div().min_w(0).truncate().text_color(running ? t.foreground : t.muted).child(r.name))
       .child(div().text_color(t.dim).text_size(11).child(r.kind && r.kind !== r.name ? r.kind : ""))
