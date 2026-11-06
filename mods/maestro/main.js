@@ -11,6 +11,7 @@ import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from 
 const MAX_TAIL = 8_000_000;
 const RECENT_MS = 24 * 3600_000;
 const KEEP_FINISHED_MS = 10 * 60_000;
+const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
 const GROUPS = [
   { id: "space", label: "Space" },
   { id: "repo", label: "Repo" },
@@ -108,8 +109,13 @@ export default class Maestro extends View {
     for (const n of names) {
       if (!n.endsWith(".json")) continue;
       const addr = n.slice(0, -5);
-      if (!live.has(addr)) { await fs.unlink(`${agentDir()}/${n}`).catch(() => {}); continue; }
-      try { next.set(addr, JSON.parse(await fs.readFile(`${agentDir()}/${n}`, "utf8"))); } catch {}
+      let rec = null;
+      try { rec = JSON.parse(await fs.readFile(`${agentDir()}/${n}`, "utf8")); } catch { continue; }
+      if (!live.has(addr)) {
+        if (Date.now() - (rec.updated ?? 0) > 60_000) await fs.unlink(`${agentDir()}/${n}`).catch(() => {});
+        continue;
+      }
+      next.set(addr, rec);
     }
     this.records = next;
   }
@@ -248,10 +254,14 @@ export default class Maestro extends View {
       const status = k.status === "error" ? "blocked" : ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : "idle";
       shown.push({ address: k.address, pane: null, space: parent?.space ?? null, space_name: parent?.space_name ?? "", tab_name: k.name ?? k.address, status, app: "copilot", title: k.title || k.name || k.address, handle: k.name ?? null, seq: 0, focused: false, parent: k.parent ?? null, cwd: k.cwd });
     }
+    const labels = new Map(terminals().map((k) => [k.address, k.labels ?? {}]));
     for (const a of shown) {
       const r = this.records.get(a.address);
-      if (r?.parent) a.parent = r.parent;
-      if (r?.name) a.handle = r.name;
+      const l = labels.get(a.address) ?? {};
+      const parent = r?.parent ?? l["maestro.parent"];
+      const name = r?.name ?? l["maestro.name"];
+      if (parent) a.parent = parent;
+      if (name) a.handle = name;
     }
     return shown;
   }
@@ -341,7 +351,12 @@ export default class Maestro extends View {
           .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
           .hover((st) => st.bg(on ? t.selected : t.hover))
           .on_click(() => setShared("maestro.group", g.id)).child(g.label);
-      })))
+      })).child(div().flex_1())
+        .child(div().id("show-finished").px(8).py(3).rounded(6).text_size(12)
+          .bg(shared("maestro.showFinished") ? t.selected : t.chrome).text_color(shared("maestro.showFinished") ? t.foreground : t.muted)
+          .hover((st) => st.bg(t.hover))
+          .on_click(() => setShared("maestro.showFinished", !shared("maestro.showFinished")))
+          .child("Show finished")))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(8).pb(8).overflow_y_scrollbar()
         .when(list.length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No Copilot sessions running.")))
         .children(rows))
@@ -434,7 +449,7 @@ export default class Maestro extends View {
   card(t, x, now) {
     const { a, snap, s } = x;
     const why = x.kind ?? (s ? attention(s) : null);
-    const running = s ? treeRows(s, now, KEEP_FINISHED_MS).filter((r) => r.status === "running").length : 0;
+    const running = s ? treeRows(s, now, keepMs()).filter((r) => r.status === "running").length : 0;
     const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
     return v_flex().id(`card-${a.address}`).p(8).gap(4).rounded(8).bg(t.surface).border_1().border_color(a.focused ? t.accent : t.border)
       .hover((st) => st.bg(t.hover))
@@ -453,7 +468,7 @@ export default class Maestro extends View {
     order.push(x.a.address);
     rows.push(this.sessionRow(t, x, now, depth, (kidsOf.get(x.a.address) ?? []).length));
     if (this.collapsed.has(x.a.address)) return;
-    if (x.s) for (const r of treeRows(x.s, now, KEEP_FINISHED_MS)) rows.push(this.agentRow(t, x, r, now, depth));
+    if (x.s) for (const r of treeRows(x.s, now, keepMs())) rows.push(this.agentRow(t, x, r, now, depth));
     const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
     for (const k of kids) this.pushSession(t, rows, order, k, kidsOf, now, depth + 1);
   }
@@ -474,7 +489,11 @@ export default class Maestro extends View {
   sessionRow(t, x, now, depth = 0, workers = 0) {
     const { a, snap, s } = x;
     const finished = depth > 0 && (a.status === "done" || a.status === "idle");
-    const why = x.kind ?? (s ? attention(s) : null);
+    const failedKids = s ? [...s.agents.values()].filter((g) => g.status === "failed" && now - (g.ended ?? 0) < keepMs()).length : 0;
+    const raw = x.kind ?? (s ? attention(s) : null) ?? (failedKids ? `${failedKids} failed` : null);
+    const ackKey = `${a.address}:${raw}:${s?.error?.at ?? ""}:${failedKids}`;
+    const acked = (shared("maestro.acked") ?? []).includes(ackKey);
+    const why = raw && !acked ? raw : null;
     const name = snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.tab_name;
     const handle = a.handle && a.handle !== name ? a.handle : null;
     const model = snap?.model?.display_name ?? s?.model ?? s?.lastModel ?? null;
@@ -483,8 +502,8 @@ export default class Maestro extends View {
     const aic = snap?.ai_used?.formatted;
     const turn = s?.turnStart && a.status === "working" ? ago(now - s.turnStart) : null;
     const up = snap?.cost?.total_duration_ms;
-    const meta = [model && (effort && !model.includes(" · ") ? `${model} · ${effort}` : model), ctx != null && `ctx ${ctx}%`, aic && `${aic} AIC`, turn && `turn ${turn}`, up != null && `up ${ago(up)}`].filter(Boolean).join(" · ");
-    const kids = (s ? treeRows(s, now, KEEP_FINISHED_MS).length : 0) + workers;
+    const meta = [x.branch && `⎇ ${x.branch}`, model && (effort && !model.includes(" · ") ? `${model} · ${effort}` : model), ctx != null && `ctx ${ctx}%`, aic && `${aic} AIC`, turn && `turn ${turn}`, up != null && `up ${ago(up)}`].filter(Boolean).join(" · ");
+    const kids = (s ? treeRows(s, now, keepMs()).length : 0) + workers;
     const open = !this.collapsed.has(a.address);
     const stop = (_e, cx) => cx.stop_propagation();
     return v_flex().id(`s-${a.address}`).ml(depth * 16).px(8).py(depth ? 4 : 6).gap(2).rounded(8).opacity(finished ? 0.55 : 1)
@@ -495,7 +514,10 @@ export default class Maestro extends View {
         .child(div().text_size(12).child(this.moodGlyph(x)))
         .when(Boolean(handle), (el) => el.child(div().px(5).rounded(4).text_size(11).bg(t.raised).text_color(t.muted).child(handle)))
         .child(div().flex_1().min_w(0).truncate().text_size(depth ? 12 : 13).child(name))
-        .when(Boolean(why), (el) => el.child(div().px(6).rounded(4).text_size(11).bg(t.blocked).text_color(t.background).child(why)))
+        .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(6).rounded(4).text_size(11).bg(t.blocked).text_color(t.background)
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
+          .child(`${why} ✓`)))
         .when(kids > 0, (el) => el.child(div().id(`tog-${a.address}`).px(4).text_color(t.dim).text_size(11)
           .on_mouse_down("left", stop)
           .on_click((_e, cx) => { cx.stop_propagation(); if (open) this.collapsed.add(a.address); else this.collapsed.delete(a.address); cx.notify(); })
