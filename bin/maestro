@@ -169,6 +169,23 @@ const commands = {
     out({ mood: m });
   },
 
+  // Why this session is (or is not) fully visible to Maestro.
+  readiness() {
+    const checks = [];
+    const add = (ok, what, fix) => checks.push({ ok, what, ...(ok ? {} : { fix }) });
+    add(Boolean(ME), "inside a Herdr terminal (HC_TERMINAL_ID)", "start Copilot from a Herdr tab or `maestro spawn`");
+    let snap = null;
+    if (ME) { try { snap = JSON.parse(readFileSync(join(DATA, "terminals", `${ME}.json`), "utf8")); } catch {} }
+    add(Boolean(snap?.session_id), "status-line bridge reporting (session id, context, AIC)", "run scripts/install.sh, then restart this Copilot session");
+    let settings = null;
+    try { settings = JSON.parse(readFileSync(join(process.env.COPILOT_HOME ?? join(homedir(), ".copilot"), "settings.json"), "utf8")); } catch {}
+    add(String(settings?.statusLine?.command ?? "").includes("maestro-statusline"), "Copilot statusLine points at maestro-statusline", "run scripts/install.sh");
+    let mod = false;
+    try { mod = existsSync(join(HOME, "mods", "maestro", "main.js")); } catch {}
+    add(mod, "Maestro mod installed in Herdr", "run scripts/install.sh");
+    out({ terminal: ME, session: snap?.session_id ?? null, ready: checks.every((c) => c.ok), checks });
+  },
+
   // Worktrees Maestro created: list them, or remove one when it is clean and its worker is gone.
   worktree([op, target, ...flags]) {
     const all = worktrees();
@@ -215,7 +232,8 @@ const commands = {
   maestro notify <title> [body]        show the human a Herdr toast that jumps here
   maestro tag add|rm|set|ls [tags]     this agent's own tags
   maestro mood <${MOODS.join("|")}|clear>
-  maestro name <short name>            label shown in Maestro`);
+  maestro name <short name>            label shown in Maestro
+  maestro readiness                    why this session is or is not fully visible to Maestro`);
   },
 };
 

@@ -21,6 +21,7 @@ everything in the Maestro layout (`cmd-shift-m`).
 | `maestro tag add\|rm\|set\|ls [tags]` | This agent's own tags (shown as `tag·agent`). |
 | `maestro mood <happy\|focused\|thinking\|proud\|confused\|stuck\|sleepy\|celebrating\|clear>` | This agent's mood glyph. |
 | `maestro name <short>` | Short label shown beside this agent. |
+| `maestro readiness` | Why this session is or is not fully visible to Maestro, with fixes. |
 
 ## Rules
 

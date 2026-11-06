@@ -60,6 +60,7 @@ maestro notify <title> [body]           # Herdr toast that focuses the agent whe
 maestro tag add|rm|set|ls [tags]
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
+maestro readiness                       # why this session is or is not fully visible
 ```
 
 Workers are always visible interactive tabs. Worktrees are sibling checkouts
