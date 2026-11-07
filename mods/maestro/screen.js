@@ -5,7 +5,14 @@ const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[P^_
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 // Lines made only of box drawing, block elements and blanks (input frames, rules).
 const DECOR = /^[\s\u2500-\u259f\u25cb-\u25cf\u2800-\u28ff]*$/;
-const EDGE = /^[\s\u2502\u2503\u2551\u258f\u2595]+|[\s\u2502\u2503\u2551\u258f\u2595]+$/g;
+const EDGE = /[\s\u2502\u2503\u2551\u258f\u2595]/;
+
+function trimEdges(line) {
+  let start = 0, end = line.length;
+  while (start < end && EDGE.test(line[start])) start++;
+  while (end > start && EDGE.test(line[end - 1])) end--;
+  return line.slice(start, end);
+}
 
 export function stripControls(s) {
   return String(s ?? "")
@@ -24,7 +31,7 @@ export function parseRead(stdout) {
 
 export const truncate = (s, width) => (s.length > width ? `${s.slice(0, Math.max(0, width - 1))}…` : s);
 
-const meaningful = (text) => stripControls(text).split("\n").map((l) => l.replace(EDGE, "")).filter((l) => !DECOR.test(l));
+const meaningful = (text) => stripControls(text).split("\n").map(trimEdges).filter((l) => !DECOR.test(l));
 
 // The last `n` non-empty, non-decorative lines, each at most `width` characters.
 export function screenLines(text, n = 8, width = 120) {

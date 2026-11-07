@@ -44,6 +44,16 @@ test("screenLines drops input frames, strips borders and truncates long lines", 
   assert.ok(long.endsWith("…"));
 });
 
+test("long interior whitespace and borders stay intact without slow edge trimming", () => {
+  const lines = [" ", "│"].map((edge) => `a${edge.repeat(100000)}b?`);
+  const started = performance.now();
+  for (const line of lines) {
+    assert.deepEqual(screenLines(` │ ${line} ┃ `, 8, line.length), [line]);
+    assert.equal(promptLine(` ║ ${line} ▕ `, line.length), line);
+  }
+  assert.ok(performance.now() - started < 1000, "long interior runs must not cause quadratic backtracking");
+});
+
 test("promptLine prefers the latest question, else the last text line", () => {
   assert.equal(promptLine(parseRead(AGENT)), "Do you want to run `npm test`?");
   assert.equal(promptLine(parseRead(CAPTURED)), "last line");
