@@ -27,11 +27,10 @@ function openModPane(mod, name, extra, how) {
 }
 
 function closeModPane(mod) {
-  const f = focused();
-  const mine = panes().filter((p) => p.mod === mod && p.terminal == null);
-  const p = mine.find((q) => q.pane === f?.pane) ?? (mine.filter((q) => q.tab === f?.tab).length === 1 ? mine.find((q) => q.tab === f?.tab) : null) ?? (mine.length === 1 ? mine[0] : null);
+  const all = panes();
+  const p = all.find((q) => q.pane === focused()?.pane && q.mod === mod && q.terminal == null);
   if (!p) return;
-  if (panes().filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
+  if (all.filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
   else run("pane.close", { pane: p.pane });
 }
 
@@ -155,7 +154,7 @@ export default class MaestroPets extends View {
         .child(this.button(t, "pets-tab", "Open as tab", () => { openModPane("maestro-pets", "Pets", {}, "tab"); this.leave(); }, { tip: "Open in a new tab of this space" }))
         .child(this.button(t, "pets-split", "Split beside", () => { openModPane("maestro-pets", "Pets", {}, "split"); this.leave(); }, { tip: "Open in a pane beside the focused one" }))
         .child(div().id("pets-close").px(8).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_mouse_down("left", (_e, cx) => { if (props()?.place !== "pane") cx.stop_propagation(); })
           .on_click(() => this.dismiss()).child("×")))
       .child(h_flex().flex_1().min_h(0).items_start()
         .child(v_flex().id("pets-grid").flex_1().min_w(0).h_full().overflow_y_scrollbar().p(12)

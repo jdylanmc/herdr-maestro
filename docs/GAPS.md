@@ -87,6 +87,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** highlight without auto-scroll; the mouse wheel still scrolls.
 **Closes with:** a scroll handle (or `scroll_into_view`) for ordinary scrolling elements.
 
+### G-14 - Mod pane bodies lack a documented host-pane ID
+
+**Wanted:** close the board or pet pane whose own × was clicked, regardless of prior focus.
+**Evidence:** installed `herdr.d.ts` documents `props().pane` for pane-header mods only; `PaneInfo` exposes pane IDs but not the content copy's props. With two copies in one tab, the old focus/uniqueness lookup either selected the other copy or found no target.
+**Shipped:** pane × controls let their press propagate to Herdr's native pane focus handler before the click resolves the focused mod pane. Window controls still stop presses to avoid dragging. Regression tests cover a terminal or another copy initially focused, both mods, and sole-pane tab closure.
+**Closes with:** a documented host-pane ID for every mod pane body.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

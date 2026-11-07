@@ -84,3 +84,51 @@ for (const initialToken of [undefined, 100]) {
     assert.equal(handoffs, 2);
   });
 }
+
+for (const name of ["maestro", "maestro-pets"]) {
+  const closeId = name === "maestro" ? "board-close" : "pets-close";
+  const render = (mod) => name === "maestro" ? mod.renderBoard({}, [], 0) : mod.render();
+  for (const focusedPane of ["terminal", "copy-a"]) {
+    test(`${name}: closing copy B while ${focusedPane} is focused`, () => {
+      const paneList = [
+        { pane: "terminal", tab: "tab", terminal: "t0" },
+        { pane: "copy-a", tab: "tab", terminal: null, mod: name },
+        { pane: "copy-b", tab: "tab", terminal: null, mod: name },
+      ];
+      const harness = loadMod(name, {
+        modProps: { place: "pane", view: "board" },
+        paneList,
+        focus: { pane: focusedPane, tab: "tab" },
+      });
+      render(harness.mod);
+      harness.click(closeId, "copy-b");
+      assert.deepEqual(harness.commands, [{ command: "pane.close", args: { pane: "copy-b" } }]);
+    });
+  }
+  test(`${name}: closing a sole pane closes its own tab`, () => {
+    const harness = loadMod(name, {
+      modProps: { place: "pane", view: "board" },
+      paneList: [
+        { pane: "copy-a", tab: "other-tab", terminal: null, mod: name },
+        { pane: "copy-b", tab: "own-tab", terminal: null, mod: name },
+      ],
+      focus: { pane: "copy-a", tab: "other-tab" },
+    });
+    render(harness.mod);
+    harness.click(closeId, "copy-b");
+    assert.deepEqual(harness.commands, [{ command: "tab.close", args: { id: "own-tab" } }]);
+  });
+  test(`${name}: window close controls still stop native dragging`, () => {
+    const harness = loadMod(name, { modProps: { view: "board" } });
+    render(harness.mod);
+    let stopped = false;
+    harness.elements.get(closeId).events.down({}, { stop_propagation() { stopped = true; } });
+    assert.equal(stopped, true);
+  });
+}
+
+test("pet pane teardown does not close another pane", () => {
+  const { mod, commands } = loadMod("maestro-pets", { modProps: { place: "pane" } });
+  mod.close();
+  assert.deepEqual(commands, []);
+});

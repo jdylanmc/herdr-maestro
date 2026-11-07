@@ -88,13 +88,12 @@ function openModPane(mod, name, extra, how) {
   run("pane.split", { direction: "right", mod, props, ...(pane ? { pane } : {}) });
 }
 
-// Closes this mod pane (the focused one of that mod, else the only one): its tab when it is alone there.
+// Pane controls let the native press focus their host before the click closes it.
 function closeModPane(mod) {
-  const f = focused();
-  const mine = panes().filter((p) => p.mod === mod && p.terminal == null);
-  const p = mine.find((q) => q.pane === f?.pane) ?? (mine.filter((q) => q.tab === f?.tab).length === 1 ? mine.find((q) => q.tab === f?.tab) : null) ?? (mine.length === 1 ? mine[0] : null);
+  const all = panes();
+  const p = all.find((q) => q.pane === focused()?.pane && q.mod === mod && q.terminal == null);
   if (!p) return;
-  if (panes().filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
+  if (all.filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
   else run("pane.close", { pane: p.pane });
 }
 
@@ -1047,7 +1046,7 @@ export default class Maestro extends View {
         .child(div().flex_1())
         .child(this.paneButtons(t, "board", "maestro", "Maestro board", { view: "board" }))
         .child(div().id("board-close").px(8).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_mouse_down("left", (_e, cx) => { if (props()?.place !== "pane") cx.stop_propagation(); })
           .on_click(() => this.dismissBoard()).child("×")))
       .child(h_flex().id("board-cols").flex_1().min_h(0).p(12).gap(10).items_start().children(cols.map((c) =>
         v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(8).gap(8).rounded(10).bg(t.chrome).overflow_y_scrollbar()
