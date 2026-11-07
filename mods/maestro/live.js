@@ -21,6 +21,7 @@ export function liveAgents(agents, terminals, records) {
   }
   // Resolve after collecting all workers, including children of parked parents.
   for (const a of shown) {
+    if (a.pinned == null) a.pinned = Boolean(byCore.get(a.address)?.labels?.["herdr.pinned"]);
     if (a.pane) continue;
     const visited = new Set([a.address]);
     let parent = byAddr.get(a.parent);

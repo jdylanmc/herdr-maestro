@@ -39,3 +39,16 @@ test("nested parked workers inherit space regardless of terminal order; lineage 
   assert.equal(shown.find((a) => a.address === "t3").status, "working");
   assert.equal(shown.find((a) => a.address === "t4").space, null);
 });
+
+test("pin labels cover parked workers and missing agent flags without overriding live flags", () => {
+  const core = [
+    worker("t1", { labels: { "herdr.pinned": true } }),
+    worker("t2", { parent: "t1", labels: { "herdr.pinned": true } }),
+    worker("t3", { labels: { "herdr.pinned": true } }),
+  ];
+  const shown = liveAgents([root, { ...root, address: "t3", pinned: false }], core, new Map());
+  assert.equal(shown.find((a) => a.address === "t1").pinned, true);
+  assert.equal(shown.find((a) => a.address === "t2").pinned, true);
+  assert.equal(shown.find((a) => a.address === "t3").pinned, false);
+  assert.equal(root.pinned, undefined);
+});

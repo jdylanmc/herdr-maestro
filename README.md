@@ -60,7 +60,16 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   add it, click one of yours to pick its color. A color belongs to the slug everywhere and only the
   human picks it: `shared("maestro.tagColors")` maps slug → Herdr theme color name (`ansi1`…`ansi6`,
   `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
-- Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there.
+- Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there;
+  the folder button picks a folder first and starts Copilot in it.
+- **Pins**: hover a card for its pin (Herdr's `terminal.pin`, shared with Herdr's own agent list and
+  every client); pinned agents sort first in their group and show a small pin.
+- **Alerts** (header, both off by default, kept in `shared("maestro.sounds")` / `shared("maestro.autoSettle")`):
+  the bell chimes once when an agent starts needing you and Herdr's own sound doesn't already
+  (Herdr chimes for agents in panes that report blocked; right-click the bell for Herdr's Settings > Alerts).
+  The archive button settles the tab of a Maestro-launched worker once it finishes after working
+  (`tab.next`/`tab.prev` skip it) and brings it back when it works again; Herdr itself brings a settled tab
+  back when its agent needs you.
 
 **Pets** are Codex-format sprite sheets (8 columns of 192×208 cells; 9-row sheets or 20-row mood
 atlases) from [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`), cmux Maestro's own pet,
@@ -117,6 +126,7 @@ maestro notify <title> [body]           # Herdr toast that focuses the agent whe
 maestro tag add|rm|set|ls [tags]        # ls shows each tag's human-picked color
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
+maestro pin [on|off]                    # pin this agent to the top of Herdr's and Maestro's lists
 maestro icon <preset|glyph> [color]     # robot, code, bug, eye, shield, compass, brush, …
 maestro pet ls | use <id|clear> | default <id>
 maestro pet add <folder|pet.json> [--link] [--force] | render [--force]
