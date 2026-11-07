@@ -2,7 +2,6 @@
 // Portable filesystem and process queries for the Maestro mod, which can only read whole
 // files and run programs. Runs on any machine with Node, which Copilot CLI requires.
 //
-//   helper.mjs tail <file> <offset> <max>   -> "<size>\n<cut|whole>\n<bytes from offset>"
 //   helper.mjs events <file> <offset>      -> "<next offset>\n" + compact JSON lines Maestro reads
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
@@ -17,28 +16,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [cmd, ...args] = process.argv.slice(2);
-
-function tail(file, offset, max) {
-  const fd = openSync(file, "r");
-  try {
-    const size = fstatSync(fd).size;
-    let from = Number(offset) || 0;
-    if (size < from) from = 0;
-    const cut = size - from > Number(max);
-    if (cut) from = size - Number(max);
-    const buf = Buffer.alloc(size - from);
-    let got = 0;
-    while (got < buf.length) {
-      const n = readSync(fd, buf, got, buf.length - got, from + got);
-      if (n <= 0) break;
-      got += n;
-    }
-    process.stdout.write(`${size}\n${cut ? "cut" : "whole"}\n`);
-    process.stdout.write(buf.subarray(0, got));
-  } finally {
-    closeSync(fd);
-  }
-}
 
 // Maestro's view of a session log: only the event types it folds, without prompts, tool
 // arguments or results, so a log of any size answers within exec's 8 MiB output limit.
@@ -155,8 +132,7 @@ async function pets(args) {
 const main = process.argv[1] && import.meta.url.endsWith(process.argv[1].split(/[\\/]/).pop());
 if (!main) {} else if (cmd === "run") runClean(args);
 else try {
-  if (cmd === "tail") tail(args[0], args[1], args[2]);
-  else if (cmd === "events") events(args[0], args[1]);
+  if (cmd === "events") events(args[0], args[1]);
   else if (cmd === "locks") locks(args[0]);
   else if (cmd === "procs") procs();
   else if (cmd === "pets") await pets(args);
