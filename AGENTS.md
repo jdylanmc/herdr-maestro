@@ -25,6 +25,18 @@ version; they are the authoritative API reference, not memory.
 - Animate natively (`.frames`, `.spin`, `.loop`, `.transition`), never with timers.
 - Prefer live Herdr data (`agents()`, `terminals()`, `spaces()`) over polling.
 
+## Tests and changesets
+
+- Run `npm test` and `npm run check` before every commit; CI runs both on pull requests.
+- Add or update focused tests under `test/` when changing pure code (`log.js`,
+  `pets.mjs`, `helper.mjs`, and `bin/maestro` commands that need no `hc`). Mods that
+  import Herdr modules cannot run outside the app; `npm run check` only parses them.
+- Tests write scratch files only under the git-ignored `.test-tmp/`.
+- Every pull request that changes behavior includes a changeset from `npx changeset`.
+  Docs-only and CI-only pull requests use `npx changeset --empty`. Never hand-edit
+  `CHANGELOG.md`; `changeset version` generates it.
+- Commit `package-lock.json` with `resolved` URLs on `https://registry.npmjs.org/` only.
+
 ## Architecture gaps
 
 When Herdr, `hc`, or an agent runtime blocks something we actually wanted,

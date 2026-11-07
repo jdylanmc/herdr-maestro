@@ -120,6 +120,24 @@ Workers are always visible interactive tabs. Worktrees are sibling checkouts
 - `bin/`: `maestro` CLI and the status-line bridge.
 - `skills/herdr-maestro/`: Copilot skill for the CLI.
 - `docs/GAPS.md`: platform limits found while building, with evidence.
+- `test/`: `node:test` unit tests; `scripts/check.mjs`: syntax and JSON checks.
+
+## Contributing
+
+Requires Node 22.13+ (22.x), 24.x, or 26+.
+
+```sh
+npm ci
+npm test          # unit tests (node --test)
+npm run check     # every script parses as an ES module; every JSON file loads
+npx changeset     # describe the change: patch, minor, or major
+```
+
+- Every pull request that changes behavior includes a changeset (`.changeset/*.md`).
+  Docs-only and CI-only pull requests use `npx changeset --empty`.
+- CI runs the changeset check, `npm run check`, `npm test`, shellcheck, and
+  `scripts/check-public.sh` on every pull request.
+- `npm run version` turns pending changesets into `CHANGELOG.md` and a version bump.
 
 ## License
 
