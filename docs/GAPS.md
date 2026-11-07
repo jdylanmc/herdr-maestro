@@ -45,6 +45,20 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Evidence:** `terminals()[i].report.kind` was `permission` during a real permission prompt; neither `herdr.d.ts` nor `AGENTS.md` document it.
 **Shipped:** used when present, session log otherwise.
 
+### G-10 - Mods cannot share modules
+
+**Wanted:** the pet pokedex (`mods/maestro-pets`) importing Maestro's pure pet helpers.
+**Blocked by:** `herdr-app check mods/maestro-pets` with `import … from "../maestro/petlib.js"`: "resolves outside the application directory"; `mod.json` has no entry-file option, and a new view inside `mods/maestro` would mean branching its `render`.
+**Shipped:** `mods/maestro-pets/petlib.js` is an exact copy of `mods/maestro/petlib.js`; `test/pets-lib.test.js` fails when they differ.
+**Closes with:** a shared module folder mods may import from, or several views per mod folder.
+
+### G-11 - `exec` stops programs after 30 s
+
+**Wanted:** render every pet sprite sheet from the mod without blocking or truncating.
+**Evidence:** `herdr.d.ts`: `exec` has a 30 s limit; the first full render of 28 sheets takes about 6 s here and grows with each pet.
+**Shipped:** `helper.mjs pets --bg` returns at once and renders in a detached Node process with a lock; Maestro shows the last `index.json` and follows `progress.json` through `watchFolder`.
+**Closes with:** a long-running or streaming `exec` for mods.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

@@ -7,11 +7,14 @@
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
 //   helper.mjs run <argv...>                 -> runs argv without inherited CMUX_* variables
-//   helper.mjs pets <out> <pet roots...>     -> renders pet sprite sheets to per-mood GIFs (pets.mjs)
+//   helper.mjs pets [--force] [--bg] <out> <pet roots...>
+//                                            -> renders pet sprite sheets to per-mood GIFs (pets.mjs);
+//                                               --bg returns at once and renders in a detached process
 
 import { openSync, readSync, closeSync, fstatSync, readdirSync, statSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const [cmd, ...args] = process.argv.slice(2);
 
@@ -133,6 +136,22 @@ function runClean(argv) {
   child.on("error", (e) => { process.stderr.write(`${argv[0]}: ${e.message}\n`); process.exit(127); });
 }
 
+// Herdr's exec allows 30 s, so the mod asks for --bg: a detached copy renders while Maestro
+// shows the last index.json and follows progress.json.
+async function pets(args) {
+  const force = args.includes("--force"), bg = args.includes("--bg");
+  const [out, ...roots] = args.filter((a) => a !== "--force" && a !== "--bg");
+  if (!out) throw new Error("usage: helper.mjs pets [--force] [--bg] <out> <roots...>");
+  if (bg) {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "pets", ...(force ? ["--force"] : []), out, ...roots], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    process.stdout.write(JSON.stringify({ started: child.pid ?? null }));
+    return;
+  }
+  const { renderAll } = await import("./pets.mjs");
+  process.stdout.write(JSON.stringify(renderAll(out, roots, { force })));
+}
+
 const main = process.argv[1] && import.meta.url.endsWith(process.argv[1].split(/[\\/]/).pop());
 if (!main) {} else if (cmd === "run") runClean(args);
 else try {
@@ -140,7 +159,7 @@ else try {
   else if (cmd === "events") events(args[0], args[1]);
   else if (cmd === "locks") locks(args[0]);
   else if (cmd === "procs") procs();
-  else if (cmd === "pets") { const { renderAll } = await import("./pets.mjs"); process.stdout.write(JSON.stringify(renderAll(args[0], args.slice(1)))); }
+  else if (cmd === "pets") await pets(args);
   else { process.stderr.write(`unknown ${cmd}\n`); process.exit(2); }
 } catch (e) {
   process.stderr.write(String(e?.message ?? e) + "\n");

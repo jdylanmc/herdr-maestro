@@ -1,22 +1,22 @@
 // Renders Codex-format pet sprite sheets (8 columns of 192x208 cells) into one animated
 // GIF per mood row, which Herdr's image loader plays natively. Run by helper.mjs:
-//   node helper.mjs pets <out-dir> [pet-dir ...]
-// Writes <out-dir>/<id>/<row>.gif and <out-dir>/index.json; skips pets already rendered
-// from the same sheet (size + mtime).
+//   node helper.mjs pets [--force] [--bg] <out-dir> [pet root ...]
+// A root is a pet.json, a pet folder, or a folder of pet folders. Writes
+// <out-dir>/<id>/<row>.gif + meta.json, <out-dir>/index.json (one entry per pet, with an
+// `error` when its sheet failed) and <out-dir>/progress.json while it runs. Skips pets
+// already rendered from the same sheet (size + mtime) unless --force. PNG sheets decode in
+// pure JS; WebP and others convert through `sips` on macOS, ImageMagick `magick` elsewhere.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, mkdtempSync, rmSync, renameSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { inflateSync } from "node:zlib";
+import { MOOD_ROWS, ID_RE, petSource } from "./petlib.js";
+
+export { MOOD_ROWS };
 
 const COLS = 8, CELL_W = 192, CELL_H = 208, STD_W = 1536;
 const COUNTS = [6, 8, 8, 4, 5, 8, 6, 6, 6];
-// cmux Maestro's mood rows: [mood atlas row, 9-row fallback].
-export const MOOD_ROWS = {
-  idle: [0, 0], thinking: [11, 8], working: [7, 7], delegating: [12, 1], question: [6, 6],
-  "needs-permission": [13, 6], confused: [14, 8], content: [3, 3], startled: [9, 4], sad: [5, 5],
-  compacting: [15, 2], sleepy: [16, 0], gone: [17, 0], proud: [18, 3], celebrating: [19, 4],
-};
 const frameCount = (row) => (row === 9 || row === 19 ? 5 : row === 12 ? 8 : row === 11 || (row >= 13 && row <= 17) ? 6 : row === 18 ? 4 : COUNTS[row] ?? 6);
 const DELAY_CS = 14;
 const SCALE = 2; // 192x208 cells become 96x104 GIFs
@@ -155,32 +155,46 @@ export function encodeGif(frames) {
 // ---- Pets ----
 function loadSheet(path) {
   const buf = readFileSync(path);
-  if (buf.readUInt32BE(0) === 0x89504e47) return decodePng(buf);
+  if (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47) return decodePng(buf);
   // WebP and others: let the platform convert (macOS sips; Windows/Linux need ImageMagick).
   const dir = mkdtempSync(join(tmpdir(), "maestro-pet-"));
   try {
     const png = join(dir, "sheet.png");
-    if (process.platform === "darwin") execFileSync("sips", ["-s", "format", "png", path, "--out", png], { stdio: "ignore" });
-    else execFileSync("magick", [path, png], { stdio: "ignore" });
+    const [cmd, args] = process.platform === "darwin" ? ["sips", ["-s", "format", "png", path, "--out", png]] : ["magick", [path, png]];
+    try { execFileSync(cmd, args, { stdio: "ignore", windowsHide: true }); }
+    catch (e) { throw new Error(e.code === "ENOENT" ? `${cmd} not found (needed for non-PNG sheets)` : `${cmd} could not convert the sheet`); }
     return decodePng(readFileSync(png));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
-export function renderPet(manifestPath, outRoot) {
-  const petDir = dirname(manifestPath);
+export function writeJsonAtomic(path, value) {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value));
+  renameSync(tmp, path);
+}
+
+export function readManifest(manifestPath) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (!manifest.id || !ID_RE.test(manifest.id)) throw new Error("pet.json needs an id of letters, digits, . _ -");
+  return manifest;
+}
+
+export function renderPet(manifestPath, outRoot, { force = false } = {}) {
+  const petDir = dirname(manifestPath);
+  const manifest = readManifest(manifestPath);
   const id = manifest.id;
-  if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new Error("bad pet id");
   const sheet = join(petDir, manifest.spritesheetPath ?? "spritesheet.webp");
+  if (!existsSync(sheet)) throw new Error(`sprite sheet ${manifest.spritesheetPath ?? "spritesheet.webp"} is missing`);
   const st = statSync(sheet);
   const stamp = `${st.size}:${Math.floor(st.mtimeMs)}`;
   const out = join(outRoot, id);
   const metaPath = join(out, "meta.json");
-  if (existsSync(metaPath)) { try { const m = JSON.parse(readFileSync(metaPath, "utf8")); if (m.stamp === stamp) return m; } catch {} }
+  if (!force && existsSync(metaPath)) { try { const m = JSON.parse(readFileSync(metaPath, "utf8")); if (m.stamp === stamp) return { ...m, skipped: true }; } catch {} }
   const img = loadSheet(sheet);
   if (img.w % COLS) throw new Error(`width ${img.w} is not 8 columns`);
   const unit = img.w / STD_W;
   const rows = Math.floor(img.h / Math.round(CELL_H * unit));
+  if (rows < 1) throw new Error(`height ${img.h} holds no 208px rows`);
   const moods = rows >= 20;
   mkdirSync(out, { recursive: true });
   const wanted = new Set(Object.values(MOOD_ROWS).map(([m, f]) => (moods ? m : f)));
@@ -192,24 +206,81 @@ export function renderPet(manifestPath, outRoot) {
     writeFileSync(join(out, `${row}.gif`), encodeGif(frames));
     made.push(row);
   }
+  if (!made.includes(0)) throw new Error("sheet has no idle row");
   const meta = { id, name: manifest.displayName ?? id, moods, rows: made.sort((a, b) => a - b), stamp };
-  writeFileSync(metaPath, JSON.stringify(meta));
+  writeJsonAtomic(metaPath, meta);
   return meta;
 }
 
-export function renderAll(outRoot, roots) {
-  mkdirSync(outRoot, { recursive: true });
-  const index = [];
+// Every pet.json under the roots, in order: a manifest file, a pet folder, or a folder of pet folders.
+export function findManifests(roots) {
+  const found = [];
   for (const root of roots) {
-    if (!existsSync(root)) continue;
-    // A manifest file, a pet folder, or a folder of pet folders.
-    const dirs = root.endsWith(".json") ? [root] : existsSync(join(root, "pet.json")) ? [join(root, "pet.json")]
-      : readdirSync(root).map((d) => join(root, d, "pet.json")).filter((f) => existsSync(f));
-    for (const d of dirs) {
-      try { const m = renderPet(d, outRoot); if (!index.some((x) => x.id === m.id)) index.push({ id: m.id, name: m.name, moods: m.moods, rows: m.rows }); }
-      catch (e) { index.push({ id: dirname(d).split(/[\\/]/).pop(), error: String(e.message ?? e) }); }
+    if (!root || !existsSync(root)) continue;
+    let list;
+    try {
+      list = root.endsWith(".json") ? [root] : existsSync(join(root, "pet.json")) ? [join(root, "pet.json")]
+        : readdirSync(root).sort().map((d) => join(root, d, "pet.json")).filter((f) => existsSync(f));
+    } catch { continue; }
+    for (const f of list) found.push({ path: f, source: petSource(root) });
+  }
+  return found;
+}
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+
+// One renderer at a time per output folder; a lock left by a dead process is taken over.
+function lock(outRoot) {
+  const path = join(outRoot, ".render.lock");
+  for (let i = 0; i < 2; i++) {
+    try { const fd = openSync(path, "wx"); writeFileSync(fd, String(process.pid)); closeSync(fd); return () => { try { unlinkSync(path); } catch {} }; }
+    catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      const pid = Number(readFileSync(path, "utf8")) || 0;
+      if (pid && pid !== process.pid && alive(pid)) return null;
+      try { unlinkSync(path); } catch {}
     }
   }
-  writeFileSync(join(outRoot, "index.json"), JSON.stringify(index));
-  return index;
+  return null;
+}
+
+export function renderAll(outRoot, roots, { force = false } = {}) {
+  mkdirSync(outRoot, { recursive: true });
+  const indexPath = join(outRoot, "index.json"), progressPath = join(outRoot, "progress.json");
+  const release = lock(outRoot);
+  if (!release) { try { return JSON.parse(readFileSync(indexPath, "utf8")); } catch { return []; } }
+  let previous = [];
+  try { previous = JSON.parse(readFileSync(indexPath, "utf8")); } catch {}
+  const manifests = findManifests(roots);
+  const started = Date.now();
+  const index = [];
+  let done = 0;
+  const progress = (state, current) => writeJsonAtomic(progressPath, {
+    state, total: manifests.length, done, current: current ?? null, force,
+    errors: index.filter((p) => p.error).length, started, ...(state === "done" ? { finished: Date.now() } : {}),
+  });
+  try {
+    for (const { path, source } of manifests) {
+      let entry;
+      let manifest = null;
+      try { manifest = readManifest(path); } catch {}
+      const fallbackId = manifest?.id ?? dirname(path).split(/[\\/]/).pop();
+      if (index.some((x) => x.id === fallbackId)) { done++; continue; }
+      progress("rendering", fallbackId);
+      try {
+        const m = renderPet(path, outRoot, { force });
+        entry = { id: m.id, name: manifest?.displayName ?? m.name, description: manifest?.description ?? "", source, moods: m.moods, rows: m.rows };
+      } catch (e) {
+        entry = { id: fallbackId, name: manifest?.displayName ?? fallbackId, description: manifest?.description ?? "", source, error: String(e?.message ?? e) };
+      }
+      index.push(entry);
+      done++;
+      // Keep pets not reached yet visible while the rest renders.
+      const pending = previous.filter((p) => !index.some((x) => x.id === p.id));
+      writeJsonAtomic(indexPath, [...index, ...pending]);
+    }
+    writeJsonAtomic(indexPath, index);
+    progress("done");
+    return index;
+  } finally { release(); }
 }

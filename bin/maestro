@@ -5,13 +5,15 @@
 // (`herdr-app do`); Maestro's mod reads the files written under data/maestro/.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, rmSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 
-const HELPER = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "mods", "maestro", "helper.mjs");
+const MOD = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "mods", "maestro");
+const HELPER = join(MOD, "helper.mjs");
+const pets = await import(pathToFileURL(join(MOD, "petlib.js")).href);
 
 const HOME = process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app");
 const DATA = join(HOME, "data", "maestro");
@@ -22,6 +24,20 @@ const ICON_PRESETS = ["robot", "code", "bug", "eye", "shield", "compass", "brush
 const MOODS = ["happy", "focused", "thinking", "proud", "confused", "stuck", "sleepy", "celebrating"];
 const DEFAULT_ARGV = ["copilot", "--yolo"];
 const WORKTREES = join(DATA, "worktrees.json");
+const PETS = join(DATA, "pets");
+const CHOICES = join(PETS, "choices.json");
+const PET_SOURCES = join(DATA, "pet-sources");
+const petIndex = () => { try { return JSON.parse(readFileSync(join(PETS, "index.json"), "utf8")); } catch { return []; } };
+const choices = () => pets.parseChoices(existsSync(CHOICES) ? readFileSync(CHOICES, "utf8") : null);
+// Pets are kept per Copilot session (survives restarts and resumes), else per terminal.
+const petKey = (me) => { try { return JSON.parse(readFileSync(join(DATA, "terminals", `${me}.json`), "utf8")).session_id || me; } catch { return me; } };
+const renderPets = (force) => JSON.parse(run("node", [HELPER, "pets", ...(force ? ["--force"] : []), PETS, ...pets.petRoots(homedir(), DATA)]));
+function usablePet(id) {
+  const p = petIndex().find((x) => x.id === id);
+  if (!p) fail(`no pet ${id}; see maestro pet ls`);
+  if (p.error) fail(`pet ${id} failed to render: ${p.error}`);
+  return p;
+}
 const worktrees = () => (existsSync(WORKTREES) ? JSON.parse(readFileSync(WORKTREES, "utf8")) : {});
 const git = (cwd, args) => run("git", ["-C", cwd, ...args]).trim();
 
@@ -233,6 +249,67 @@ const commands = {
     out({ icon: glyph, color: color ?? null });
   },
 
+  // Pets: list, choose this session's or the default, add a sheet, re-render.
+  pet([op = "ls", ...args]) {
+    if (op === "ls") {
+      const c = choices();
+      const mine = ME ? pets.chosenPet(c, petKey(ME)) : null;
+      out(petIndex().map((p) => ({ id: p.id, name: p.name, source: p.source ?? null, sheet: p.error ? null : p.moods ? "mood atlas" : "9-row",
+        ...(p.error ? { error: p.error } : {}), ...(p.id === (c.default ?? pets.DEFAULT_PET) ? { default: true } : {}), ...(p.id === mine ? { mine: true } : {}) })));
+      return;
+    }
+    if (op === "use") {
+      const me = needMe(), key = petKey(me), [id] = args;
+      if (!id) { const c = choices(); out({ session: key, pet: pets.resolvePet(petIndex(), pets.chosenPet(c, key))?.id ?? null, chosen: c.sessions[key] ?? null }); return; }
+      if (id !== "clear") usablePet(id);
+      writeJson(CHOICES, pets.setChoice(choices(), key, id === "clear" ? null : id));
+      out({ session: key, pet: id === "clear" ? null : id });
+      return;
+    }
+    if (op === "default") {
+      const [id] = args;
+      if (!id) { out({ default: choices().default ?? pets.DEFAULT_PET }); return; }
+      usablePet(id);
+      writeJson(CHOICES, pets.setChoice(choices(), null, id));
+      out({ default: id });
+      return;
+    }
+    if (op === "render") {
+      const index = renderPets(args.includes("--force"));
+      out({ pets: index.filter((p) => !p.error).length, failed: index.filter((p) => p.error).map(({ id, error }) => ({ id, error })) });
+      return;
+    }
+    if (op === "add") {
+      const src = args.find((a) => !a.startsWith("--"));
+      if (!src) fail("usage: maestro pet add <pet folder | pet.json> [--link] [--force]");
+      const abs = resolve(src);
+      const manifest = abs.endsWith(".json") ? abs : join(abs, "pet.json");
+      if (!existsSync(manifest)) fail(`${manifest} not found`);
+      const m = JSON.parse(readFileSync(manifest, "utf8"));
+      if (!m.id || !pets.ID_RE.test(m.id)) fail("pet.json needs an id of letters, digits, . _ -");
+      const sheet = m.spritesheetPath ?? "spritesheet.webp";
+      if (!existsSync(join(dirname(manifest), sheet))) fail(`sprite sheet ${sheet} not found next to pet.json`);
+      const clash = petIndex().find((p) => p.id === m.id && p.source !== "added");
+      if (clash) fail(`a ${clash.source ?? "other"} pet already uses id ${m.id}; give this one another id`);
+      const dest = join(PET_SOURCES, m.id);
+      if (resolve(dirname(manifest)).startsWith(resolve(PET_SOURCES))) fail(`${m.id} is already in ${PET_SOURCES}; use maestro pet render`);
+      if (existsSync(dest)) { if (!args.includes("--force")) fail(`${m.id} was already added (use --force to replace)`); rmSync(dest, { recursive: true, force: true }); }
+      mkdirSync(PET_SOURCES, { recursive: true });
+      if (args.includes("--link")) symlinkSync(dirname(manifest), dest, process.platform === "win32" ? "junction" : "dir");
+      else {
+        mkdirSync(dirname(join(dest, sheet)), { recursive: true });
+        copyFileSync(manifest, join(dest, "pet.json"));
+        copyFileSync(join(dirname(manifest), sheet), join(dest, sheet));
+      }
+      const p = renderPets(false).find((x) => x.id === m.id);
+      if (!p) fail(`added ${m.id}, but the renderer did not find it`);
+      if (p.error) fail(`added ${m.id}, but it failed to render: ${p.error}`);
+      out({ added: m.id, name: p.name, sheet: p.moods ? "mood atlas" : "9-row", path: dest });
+      return;
+    }
+    fail("usage: maestro pet ls | use <id|clear> | default <id> | add <path> [--link] [--force] | render [--force]");
+  },
+
   name([n]) {
     const me = needMe();
     saveRecord(me, { name: n ?? null });
@@ -256,6 +333,12 @@ const commands = {
   maestro mood <${MOODS.join("|")}|clear>
   maestro name <short name>            label shown in Maestro
   maestro icon <preset|glyph> [color]   this agent's icon; color: theme name (ansi1-6, accent…) or #rrggbb (no argument lists presets; clear resets)
+  maestro pet ls                       pets you can pick (mine/default marked)
+  maestro pet use <id|clear>           this session's pet (kept across restarts and resumes)
+  maestro pet default <id>             pet for sessions that have not picked one
+  maestro pet add <folder|pet.json> [--link] [--force]
+                                       add a Codex-format pet and render it
+  maestro pet render [--force]         render new or changed sheets (all with --force)
   maestro readiness                    why this session is or is not fully visible to Maestro`);
   },
 };
