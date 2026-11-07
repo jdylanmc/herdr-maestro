@@ -21,7 +21,9 @@ const ICONS = {
   brush: "\u{F1FC}", flask: "\u{F0C3}", rocket: "\u{F135}", cogs: "\u{F085}", search: "\u{F002}", book: "\u{F02D}",
   terminal: "\u{F120}", wrench: "\u{F0AD}", lightbulb: "\u{F0EB}", heart: "\u{F004}", star: "\u{F005}", bolt: "\u{F0E7}",
 };
-const IDENTITY = ["#22a99a", "#e3814f", "#5b8def", "#8b7cf6", "#3fae6a", "#d9649a", "#d8b14a", "#4fb3d9"];
+// Identity colors come from the active Herdr theme, so icons and tags follow theme changes.
+const palette = (t) => [t.ansi6, t.ansi3, t.ansi4, t.ansi5, t.ansi2, t.ansi1].filter(Boolean);
+const themed = (t, c) => (c && !c.startsWith("#") ? t[c] : c);
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619); return h >>> 0; };
 const find = (node, id) => { if (node?.id === id) return node; for (const c of node?.children ?? []) { const f = find(c, id); if (f) return f; } return null; };
@@ -525,7 +527,7 @@ export default class Maestro extends View {
   icon(t, x, size = 18) {
     const key = x.rec.icon ?? null;
     const glyph = key ? (ICONS[key] ?? key) : Object.values(ICONS)[hash(x.tagKey) % Object.keys(ICONS).length];
-    const color = x.rec.color ?? IDENTITY[hash(x.tagKey + "c") % IDENTITY.length];
+    const color = themed(t, x.rec.color) ?? palette(t)[hash(x.tagKey + "c") % palette(t).length];
     return div().w(size + 4).flex_none().text_center().font_family(NERD).text_size(size).text_color(color).child(glyph);
   }
 
@@ -535,7 +537,7 @@ export default class Maestro extends View {
   statusGlyph(t, x, size = 12) {
     const st = x.failed ? "failed" : x.a.status;
     if (st === "working") return svg("mods/workspace-chrome/spinner.svg").size(size).flex_none().text_color(t.working).spin(900);
-    if (st === "blocked") return h_flex().size(size + 2).flex_none().rounded(3).bg(t.ansi4 ?? t.accent).items_center().justify_center().text_size(size - 2).font_bold().text_color("#ffffff").child(x.kind === "permission" ? "!" : "?");
+    if (st === "blocked") return h_flex().size(size + 2).flex_none().rounded(3).bg(t.ansi4 ?? t.accent).items_center().justify_center().text_size(size - 2).font_bold().text_color(t.background).child(x.kind === "permission" ? "!" : "?");
     if (st === "failed") return div().flex_none().text_size(size).text_color(t.blocked).child("⊗");
     if (st === "done") return div().flex_none().text_size(size).text_color(t.done).child("✓");
     return div().size(size - 4).mx(2).flex_none().rounded(size).border(1.5).border_color(t.idle ?? t.dim);
@@ -659,9 +661,9 @@ export default class Maestro extends View {
 
   tagChips(t, tags) {
     return h_flex().flex_none().gap(4).children(tags.slice(0, 3).map(({ g, mine }) => {
-      const c = IDENTITY[hash(g) % IDENTITY.length];
-      return div().px(6).h(18).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? "#11111b" : c)
-        .bg(mine ? c : c + "22").text_size(11).font_medium().text_color(mine ? "#11111b" : c).child(g);
+      const c = palette(t)[hash(g) % palette(t).length];
+      return div().px(6).h(18).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? t.background : c)
+        .bg(mine ? c : c + "22").text_size(11).font_medium().text_color(mine ? t.background : c).child(g);
     }));
   }
 

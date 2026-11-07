@@ -222,7 +222,7 @@ const commands = {
     if (!glyph) { const r = recordOf(me); out({ icon: r.icon ?? null, color: r.color ?? null, presets: ICON_PRESETS }); return; }
     if (glyph === "clear") { saveRecord(me, { icon: null, color: null }); out({ icon: null }); return; }
     if (!ICON_PRESETS.includes(glyph) && [...glyph].length !== 1) fail(`icon must be one of ${ICON_PRESETS.join(", ")} or a single Nerd Font glyph`);
-    if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) fail("color must be #rrggbb");
+    if (color && !/^(#[0-9a-fA-F]{6}|ansi[1-6]|accent|working|blocked|done)$/.test(color)) fail("color must be a theme color (ansi1-ansi6, accent, working, blocked, done) or #rrggbb");
     saveRecord(me, { icon: glyph, color: color ?? recordOf(me).color ?? null });
     out({ icon: glyph, color: color ?? null });
   },
@@ -249,7 +249,7 @@ const commands = {
   maestro tag add|rm|set|ls [tags]     this agent's own tags
   maestro mood <${MOODS.join("|")}|clear>
   maestro name <short name>            label shown in Maestro
-  maestro icon <preset|glyph> [#rrggbb] this agent's icon (no argument lists presets; clear resets)
+  maestro icon <preset|glyph> [color]   this agent's icon; color: theme name (ansi1-6, accent…) or #rrggbb (no argument lists presets; clear resets)
   maestro readiness                    why this session is or is not fully visible to Maestro`);
   },
 };

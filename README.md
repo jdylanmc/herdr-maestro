@@ -48,6 +48,10 @@ Beats (scheduled prompts) with cadence, run count and next run.
 
 **Board**: one card per session in Waiting on you, Working, Failed, Finished and Idle.
 
+**Theming**: every color comes from the active Herdr theme (`theme()`): surfaces, status, tags and
+agent icons (theme color names such as `ansi4`, never fixed hex unless an agent asks for one), so
+any Herdr or layout theme, light or dark, applies. Space avatars use Herdr's own space colors.
+
 ## Agent CLI
 
 Copilot agents learn these from the bundled `herdr-maestro` skill.
@@ -62,7 +66,7 @@ maestro notify <title> [body]           # Herdr toast that focuses the agent whe
 maestro tag add|rm|set|ls [tags]
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
-maestro icon <preset|glyph> [#rrggbb]   # robot, code, bug, eye, shield, compass, brush, …
+maestro icon <preset|glyph> [color]     # robot, code, bug, eye, shield, compass, brush, …
 maestro readiness                       # why this session is or is not fully visible
 ```
 
