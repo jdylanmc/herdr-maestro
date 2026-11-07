@@ -87,7 +87,7 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** highlight without auto-scroll; the mouse wheel still scrolls.
 **Closes with:** a scroll handle (or `scroll_into_view`) for ordinary scrolling elements.
 
-### G-15 - Mod pane bodies lack a documented host-pane ID
+### G-16 - Mod pane bodies lack a documented host-pane ID
 
 **Wanted:** close the board or pet pane whose own × was clicked, regardless of prior focus.
 **Evidence:** installed `herdr.d.ts` documents `props().pane` for pane-header mods only; `PaneInfo` exposes pane IDs but not the content copy's props. With two copies in one tab, the old focus/uniqueness lookup either selected the other copy or found no target.

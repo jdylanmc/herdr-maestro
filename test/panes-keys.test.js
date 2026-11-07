@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { spacePlace } from "../mods/maestro/wtlib.js";
 
-function loadMod(name, { initialToken, modProps = {}, paneList = [], focus = null } = {}) {
+function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
@@ -27,11 +28,15 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], focus = nul
   };
   const context = vm.createContext({
     View: class {},
-    div: element, v_flex: element, h_flex: element,
+    div: element, v_flex: element, h_flex: element, svg: element,
     props: () => modProps,
     shared: () => token,
     focused: () => focus,
     panes: () => paneList,
+    spaces: () => spaceList,
+    spacePlace,
+    layout: () => null,
+    setAgentOrder() {},
     agents: () => [],
     theme: () => ({}),
     run: (command, args) => commands.push({ command, args: { ...args } }),
@@ -63,6 +68,24 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], focus = nul
     },
   };
 }
+
+test("keyboard navigation preserves nested worktree rows and refreshes empty spaces", () => {
+  const sp = { id: "worktree", folder: "/repo/worktree" };
+  const { mod, cx } = loadMod("maestro", { spaceList: [sp] });
+  let refreshed;
+  let rowTree;
+  mod.sessions = () => [];
+  mod.watchBlocked = () => {};
+  mod.refreshGit = (list) => { refreshed = list; };
+  mod.nestedSpaces = () => [{ sp, tree: "nested" }];
+  mod.spaceRow = (_t, _sp, _mine, _kids, tree) => { rowTree = tree; return null; };
+  mod.attentionStrip = () => null;
+  mod.render(cx);
+  assert.equal(rowTree, "nested");
+  assert.equal(refreshed.length, 1);
+  assert.equal(refreshed[0].cwd, sp.folder);
+  assert.equal(mod.nav[0].key, "sp:worktree");
+});
 
 for (const initialToken of [undefined, 100]) {
   test(`first new footer handoff focuses the list (baseline ${initialToken})`, async () => {
