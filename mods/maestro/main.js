@@ -410,21 +410,22 @@ export default class Maestro extends View {
     }
   }
 
-  sessionFor(addr) {
+  sessionFor(addr, agent = this.live().find((a) => a.address === addr)) {
+    if (otherAgent(agent)) return null;
     return this.snaps.get(addr)?.session_id ?? this.fallback.get(addr) ?? null;
   }
 
   async tailAll(machine = null) {
     // Other views (the pet pokedex) key sessions the same way: session id, else terminal.
     if (this.primary) {
-      const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address) ?? a.address]));
+      const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address, a) ?? a.address]));
       if (JSON.stringify(keys) !== JSON.stringify(shared("maestro.sessionKeys") ?? {})) setShared("maestro.sessionKeys", keys);
     }
     const ids = new Map();
     for (const a of this.live()) {
       const on = this.machineFor(a);
       if (on !== machine) continue;
-      const id = this.sessionFor(a.address);
+      const id = this.sessionFor(a.address, a);
       if (id) ids.set(id, on);
     }
     await Promise.all([...ids].map(([id, on]) => this.tail(id, on)));
@@ -470,8 +471,8 @@ export default class Maestro extends View {
     const spMachine = new Map(spaces().map((sp) => [sp.id, sp.machine ?? null]));
     return this.live().map((a) => {
       const pane = byPane.get(a.pane);
-      const snap = this.snaps.get(a.address);
-      const id = this.sessionFor(a.address);
+      const snap = otherAgent(a) ? null : this.snaps.get(a.address);
+      const id = this.sessionFor(a.address, a);
       const L = id ? this.logs.get(id) : null;
       const cwd = snap?.cwd ?? pane?.cwd ?? a.cwd ?? null;
       const key = a.space_name || "";
