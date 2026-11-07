@@ -156,7 +156,7 @@ each one's kind; `rm` refuses while its worker or any live terminal is in it, or
 - Lineage and names are herdr-core labels (`maestro.parent`, `maestro.name`).
 - Agents on another machine: Maestro probes it with Node (`exec(..., { on })`); where Maestro is
   installed there too, binding, log tails, git and status-line snapshots run on that machine.
-  Otherwise those agents show Herdr's status and title only (see `docs/GAPS.md` G-14).
+  Otherwise those agents show Herdr's status and title only (see `docs/GAPS.md` G-17).
 - Sessions Maestro launches start through `helper.mjs run`, which drops `CMUX_*` variables a
   cmux-launched herdr-core would otherwise pass on.
 

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { spacePlace } from "../mods/maestro/wtlib.js";
 
-function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null } = {}) {
+function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
@@ -34,6 +34,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     focused: () => focus,
     panes: () => paneList,
     spaces: () => spaceList,
+    exec: execImpl,
     spacePlace,
     layout: () => null,
     setAgentOrder() {},
@@ -85,6 +86,28 @@ test("keyboard navigation preserves nested worktree rows and refreshes empty spa
   assert.equal(refreshed.length, 1);
   assert.equal(refreshed[0].cwd, sp.folder);
   assert.equal(mod.nav[0].key, "sp:worktree");
+});
+
+test("render refreshes a remote shell-only space with remote Git and no local lookup", async () => {
+  const calls = [];
+  const sp = { id: "box/s1", folder: "/remote/repo", machine: "box" };
+  const { mod, cx, tasks } = loadMod("maestro", {
+    spaceList: [sp],
+    execImpl: async (command, args, options) => {
+      calls.push([command, args[1], options?.on ?? null]);
+      return { code: 0, stdout: "/remote/repo/.git\n/remote/repo\nfeature\n" };
+    },
+  });
+  mod.sessions = () => [];
+  mod.watchBlocked = () => {};
+  mod.nestedSpaces = () => [];
+  mod.attentionStrip = () => null;
+  mod.render(cx);
+  assert.equal(tasks.length, 1);
+  await tasks.pop()(cx);
+  assert.deepEqual(calls, [["git", sp.folder, "box"]]);
+  assert.equal(mod.gitOf(sp.folder, "box").branch, "feature");
+  assert.equal(mod.gitOf(sp.folder), null);
 });
 
 for (const initialToken of [undefined, 100]) {

@@ -486,7 +486,7 @@ export default class Maestro extends View {
     if (this.view !== "footer") this.watchBlocked(list);
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
-    this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()) }))]);
+    this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()), machine: sp.machine ?? null }))]);
     this.keyboardState();
     this.nav = [];
     const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
