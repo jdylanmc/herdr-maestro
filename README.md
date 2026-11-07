@@ -111,7 +111,8 @@ maestro readiness                       # why this session is or is not fully vi
 Workers are interactive tabs, or pane-less sub-agents with `--bg`. Worktrees are sibling checkouts
 `<repo>-<branch>` by default; `--herdr-space` (or `MAESTRO_WORKTREE=herdr`, or
 `shared("maestro.worktreeKind") = "herdr"`) makes one the way Herdr's worktree mod does,
-`~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's. `worktree ls` shows
+`~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's, unless `--bg`
+keeps the worker pane-less in its parent's space. `worktree ls` shows
 each one's kind; `rm` refuses while its worker or any live terminal is in it, or the tree is dirty.
 
 ## How it works

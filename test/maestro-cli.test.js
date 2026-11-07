@@ -29,7 +29,8 @@ const a = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify([name, ...a]) + "\\n");
 const T = JSON.parse(process.env.FAKE_TERMINALS);
 const say = (v) => process.stdout.write(JSON.stringify(v));
-if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [{ id: "s1", name: "Workspace", tabs: [{ id: "tab1", name: "Parent", terminals: [{ terminal: "t1" }] }] }] } : a[1] === "tab.new" ? { terminal: "t7", tab: "tab7", space: "s1" } : { ok: true });
+if (name === "git") process.stdout.write(a.includes("--show-toplevel") ? process.env.FAKE_REPO : a.includes("--git-common-dir") ? process.env.FAKE_REPO + "/.git" : "");
+else if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [{ id: "s1", name: "Workspace", tabs: [{ id: "tab1", name: "Parent", terminals: [{ terminal: "t1" }] }] }] } : a[1] === "tab.new" || a[1] === "space.new" ? { terminal: "t7", tab: "tab7", space: a[1] === "space.new" ? "s7" : "s1" } : { ok: true });
 else if (a[0] === "ls") say({ terminals: T.map(({ labels, ...t }) => t) });
 else if (a[0] === "get") say(T.find((t) => t.address === a[1]) ?? {});
 else if (a[0] === "run") say({ address: "t7", state: "live" });
@@ -43,7 +44,7 @@ function maestro(args, me = "t1", terminals = TERMINALS) {
   writeFileSync(LOG, "");
   const r = spawnSync(process.execPath, [join(ROOT, "bin", "maestro"), ...args], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, HC_TERMINAL_ID: me, HERDR_APP_HOME: join(DIR, "home"), FAKE_LOG: LOG, FAKE_TERMINALS: JSON.stringify(terminals) },
+    env: { ...process.env, HOME: join(DIR, "home"), PATH: `${BIN}:${process.env.PATH}`, HC_TERMINAL_ID: me, HERDR_APP_HOME: join(DIR, "home"), FAKE_LOG: LOG, FAKE_REPO: join(DIR, "repo"), FAKE_TERMINALS: JSON.stringify(terminals) },
   });
   const calls = readFileSync(LOG, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, err: r.stderr, calls, acts: calls.filter((c) => !["ls", "get"].includes(c[1])) };
@@ -51,7 +52,7 @@ function maestro(args, me = "t1", terminals = TERMINALS) {
 
 before(() => {
   mkdirSync(BIN, { recursive: true });
-  for (const n of ["hc", "herdr-app"]) { writeFileSync(join(BIN, n), FAKE); chmodSync(join(BIN, n), 0o755); }
+  for (const n of ["hc", "herdr-app", "git"]) { writeFileSync(join(BIN, n), FAKE); chmodSync(join(BIN, n), 0o755); }
   writeFileSync(join(DIR, "file.txt"), "x");
 });
 after(() => rmSync(DIR, { recursive: true, force: true }));
@@ -140,4 +141,30 @@ test("space inheritance terminates on a cyclic parent chain", { skip }, () => {
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out.space, null);
   assert.equal(r.out.parent, "t6");
+});
+
+test("worktree spawns preserve native-space and sibling-tab routing alongside background mode", { skip }, () => {
+  for (const [flag, kind, verb] of [["--herdr-space", "herdr", "space.new"], ["--sibling", "sibling", "tab.new"]]) {
+    const r = maestro(["spawn", "--worktree", `test-${kind}`, flag, "--name", "Worktree"]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.kind, kind);
+    const action = r.acts.find((c) => c[0] === "herdr-app");
+    assert.equal(action[2], verb);
+    const req = JSON.parse(action[3]);
+    assert.equal(req.folder, r.out.worktree);
+    if (kind === "herdr") {
+      assert.equal(req.tab, "Worktree");
+      assert.equal(req.space, undefined);
+    } else {
+      assert.equal(req.name, "Worktree");
+      assert.equal(req.space, "s1");
+    }
+  }
+  const bg = maestro(["spawn", "--worktree", "background", "--herdr-space", "--bg"]);
+  assert.equal(bg.code, 0, bg.err);
+  assert.equal(bg.out.background, true);
+  assert.ok(!bg.acts.some((c) => c[0] === "herdr-app"));
+  const record = JSON.parse(readFileSync(join(DIR, "home", "data", "maestro", "worktrees.json"), "utf8"))[bg.out.worktree];
+  assert.equal(record.kind, "herdr");
+  assert.equal(record.terminal, bg.out.address);
 });
