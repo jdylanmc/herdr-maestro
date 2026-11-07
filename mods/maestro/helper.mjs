@@ -7,6 +7,7 @@
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
 //   helper.mjs run <argv...>                 -> runs argv without inherited CMUX_* variables
+//   helper.mjs pets <out> <pet roots...>     -> renders pet sprite sheets to per-mood GIFs (pets.mjs)
 
 import { openSync, readSync, closeSync, fstatSync, readdirSync, statSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
@@ -89,6 +90,7 @@ else try {
   else if (cmd === "recent") recent(args[0], args[1] ?? 60, args[2] ?? 0);
   else if (cmd === "locks") locks(args[0]);
   else if (cmd === "procs") procs();
+  else if (cmd === "pets") { const { renderAll } = await import("./pets.mjs"); process.stdout.write(JSON.stringify(renderAll(args[0], args.slice(1)))); }
   else { process.stderr.write(`unknown ${cmd}\n`); process.exit(2); }
 } catch (e) {
   process.stderr.write(String(e?.message ?? e) + "\n");

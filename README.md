@@ -28,21 +28,24 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 | `cmd-shift-b` | Open the board window (Maestro layout) |
 | `cmd-shift-t` | Edit tags of the focused session (Maestro layout) |
 
-**Session list**
-- Groups by Space, Repo or Org; `+ copilot` starts a session in that group's folder.
-- Each session: status, animated pet (mood), name, branch, model and effort, context %,
-  AIC, turn and session time, operator tags and agent tags, Beats count.
-- Workers launched with `maestro spawn` or `hc run` nest under their parent; Copilot
-  subagents nest under their session, with ✓ / ✗ / ⊘ and duration.
-- Attention cues (`permission`, `question`, `error`, `N failed`) come from herdr-core's
-  blocked reason and the session log; click a cue to acknowledge it (it answers nothing).
-- Up/down arrows reorder sessions in Maestro only; Herdr's own order is untouched.
-- **Show finished** keeps finished subagents for 24 h instead of 10 min.
+**Hierarchy** (replaces Herdr's separate spaces and agents lists in the Maestro layout)
+- **Space** → **worktree/repo** → **agent card** → its **internal tasks** (Copilot subagents) and
+  **workers** (`maestro spawn` / `hc run`), indented like an outline. Folding a space or worktree
+  leaves an icon card of its agents.
+- Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
+  its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
+  pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
+- Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there.
 - **Recent**: sessions from the last 24 h that are not running, with resume and dismiss.
 
-**Footer** for the focused session: tags (`Edit tags…`), mood preview, terminal and
-parent, session id, folder, branch, AIC / premium requests / lines changed, context,
-and Beats (scheduled prompts) with cadence, run count and next run.
+**Pets** are [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`) and cmux Maestro's own
+pet, rendered once by `mods/maestro/pets.mjs` into one GIF per mood under
+`data/maestro/pets/` (Herdr plays GIFs natively). Click the footer pet to switch pets for a session;
+**Moods…** previews each mood. WebP sheets need `sips` (macOS) or ImageMagick.
+
+**Footer** for the focused session: large pet, name, status, terminal and parent, model and
+effort, context, elapsed time, AIC and lines changed, branch and folder, tags, session id, and
+Beats (scheduled prompts) with cadence, run count and next run.
 
 **Board**: one card per session in Waiting on you, Working, Failed, Finished and Idle.
 
@@ -60,6 +63,7 @@ maestro notify <title> [body]           # Herdr toast that focuses the agent whe
 maestro tag add|rm|set|ls [tags]
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
+maestro icon <preset|glyph> [#rrggbb]   # robot, code, bug, eye, shield, compass, brush, …
 maestro readiness                       # why this session is or is not fully visible
 ```
 

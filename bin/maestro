@@ -18,6 +18,7 @@ const DATA = join(HOME, "data", "maestro");
 const AGENTS = join(DATA, "agents");
 const NOTIFY = join(DATA, "notify");
 const ME = process.env.HC_TERMINAL_ID ?? null;
+const ICON_PRESETS = ["robot", "code", "bug", "eye", "shield", "compass", "brush", "flask", "rocket", "cogs", "search", "book", "terminal", "wrench", "lightbulb", "heart", "star", "bolt"];
 const MOODS = ["happy", "focused", "thinking", "proud", "confused", "stuck", "sleepy", "celebrating"];
 const DEFAULT_ARGV = ["copilot", "--yolo"];
 const WORKTREES = join(DATA, "worktrees.json");
@@ -215,6 +216,17 @@ const commands = {
     out({ removed: path, branch: w.branch, note: "branch kept" });
   },
 
+  // This agent's icon in Maestro: a preset name or one Nerd Font glyph, with an optional #rrggbb color.
+  icon([glyph, color]) {
+    const me = needMe();
+    if (!glyph) { const r = recordOf(me); out({ icon: r.icon ?? null, color: r.color ?? null, presets: ICON_PRESETS }); return; }
+    if (glyph === "clear") { saveRecord(me, { icon: null, color: null }); out({ icon: null }); return; }
+    if (!ICON_PRESETS.includes(glyph) && [...glyph].length !== 1) fail(`icon must be one of ${ICON_PRESETS.join(", ")} or a single Nerd Font glyph`);
+    if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) fail("color must be #rrggbb");
+    saveRecord(me, { icon: glyph, color: color ?? recordOf(me).color ?? null });
+    out({ icon: glyph, color: color ?? null });
+  },
+
   name([n]) {
     const me = needMe();
     saveRecord(me, { name: n ?? null });
@@ -237,6 +249,7 @@ const commands = {
   maestro tag add|rm|set|ls [tags]     this agent's own tags
   maestro mood <${MOODS.join("|")}|clear>
   maestro name <short name>            label shown in Maestro
+  maestro icon <preset|glyph> [#rrggbb] this agent's icon (no argument lists presets; clear resets)
   maestro readiness                    why this session is or is not fully visible to Maestro`);
   },
 };
