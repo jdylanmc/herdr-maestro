@@ -59,6 +59,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** `helper.mjs pets --bg` returns at once and renders in a detached Node process with a lock; Maestro shows the last `index.json` and follows `progress.json` through `watchFolder`.
 **Closes with:** a long-running or streaming `exec` for mods.
 
+### G-12 - `HoverCard` reports no open event
+
+**Wanted:** read a terminal's screen only when its hover preview opens.
+**Blocked by:** `gpui-kit.d.ts`: `HoverCard` accepts `on_open_change` but "today never calls it".
+**Shipped:** the card's trigger reads on `on_hover` (pointer entry), at most every 3 s per terminal; the 400 ms open delay hides the read.
+**Closes with:** `on_open_change` firing for hover cards.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

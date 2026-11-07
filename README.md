@@ -65,6 +65,11 @@ and pets you add (`data/maestro/pet-sources/`). The first id found wins, in that
   `data/maestro/pet-sources/<id>` (`--link` links the folder instead) and renders it.
   `maestro pet render [--force]` re-renders from the shell.
 
+**Live screen text**: hovering a card shows the last 8 lines of its terminal (`hc read`, read on
+hover, cached 3 s); a card waiting on you shows the latest question or line under its cause, read when
+it becomes blocked and at most every 30 s after. Control sequences are stripped and lines truncated.
+Screen text stays in memory and in the local UI only; Maestro never writes it to disk.
+
 **Footer** for the focused session: large pet, name, status, terminal and parent, model and
 effort, context, elapsed time, AIC and lines changed, branch and folder, tags, session id, and
 Beats (scheduled prompts) with cadence, run count and next run.
