@@ -14,6 +14,7 @@ import { realpathSync } from "node:fs";
 const MOD = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "mods", "maestro");
 const HELPER = join(MOD, "helper.mjs");
 const pets = await import(pathToFileURL(join(MOD, "petlib.js")).href);
+const wt = await import(pathToFileURL(join(MOD, "wtlib.js")).href);
 
 const HOME = process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app");
 const DATA = join(HOME, "data", "maestro");
@@ -41,16 +42,21 @@ function usablePet(id) {
 const worktrees = () => (existsSync(WORKTREES) ? JSON.parse(readFileSync(WORKTREES, "utf8")) : {});
 const git = (cwd, args) => run("git", ["-C", cwd, ...args]).trim();
 
-// A sibling checkout: <parent of repo>/<repo>-<branch>, on a new branch from HEAD.
-function makeWorktree(from, branch, owner) {
+// kind "sibling": <parent of repo>/<repo>-<branch>. kind "herdr": Herdr's worktree mod
+// convention, ~/.herdr/worktrees/<repo>/<branch>, shown as its own space nested under the repo's.
+// A new branch starts from HEAD; an existing one is checked out.
+function makeWorktree(from, branch, owner, kind = "sibling") {
   const top = git(from, ["rev-parse", "--show-toplevel"]);
-  const path = join(dirname(top), `${basename(top)}-${branch.replace(/[^A-Za-z0-9._-]+/g, "-")}`);
+  const repo = wt.repoOf(git(from, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const path = kind === "herdr" ? resolve(wt.herdrPath(homedir(), repo.name, branch)) : wt.siblingPath(top, branch);
   if (existsSync(path)) fail(`${path} already exists`);
   const exists = run("git", ["-C", top, "branch", "--list", branch]).trim();
-  git(top, ["worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path])]);
-  writeJson(WORKTREES, { ...worktrees(), [path]: { repo: top, branch, owner, created: Date.now() } });
+  if (kind === "herdr") mkdirSync(dirname(path), { recursive: true });
+  git(top, ["worktree", "add", ...(exists ? [path, branch] : ["-b", branch, path, ...(kind === "herdr" ? ["HEAD"] : [])])]);
+  writeJson(WORKTREES, { ...worktrees(), [path]: { repo: top, branch, owner, kind, created: Date.now() } });
   return path;
 }
+const sharedConfig = () => { try { return JSON.parse(readFileSync(join(HOME, "shared.json"), "utf8")); } catch { return {}; } };
 
 // Same canonical slug as the tag editor: lowercase [a-z0-9-], at most 24 characters.
 const slug = (x) => String(x).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).replace(/-+$/, "");
@@ -140,19 +146,25 @@ const commands = {
       else if (a === "--cwd") opt.cwd = args[++i];
       else if (a === "--task") opt.task = args[++i];
       else if (a === "--worktree") opt.worktree = args[++i];
+      else if (a === "--herdr-space" || a === "--sibling") opt.kindFlag = a;
       else if (a === "--") { opt.argv = args.slice(i + 1); break; }
       else if (!opt.task) opt.task = a;
     }
-    if (opt.worktree) opt.cwd = makeWorktree(opt.cwd, opt.worktree, me);
+    const kind = opt.worktree ? wt.chooseKind(opt.kindFlag ? [opt.kindFlag] : [], process.env, sharedConfig()) : null;
+    if (opt.worktree) opt.cwd = makeWorktree(opt.cwd, opt.worktree, me, kind);
     const self = world().find((t) => t.address === me);
     const argv = ["node", HELPER, "run", ...(opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])])];
-    const req = { ...(self?.space ? { space: self.space } : {}), folder: opt.cwd, argv, ...(opt.name ? { name: opt.name } : {}) };
-    const made = JSON.parse(run("herdr-app", ["do", "tab.new", JSON.stringify(req)]));
-    if (made.error || !made.terminal) fail(`tab.new failed: ${made.error ?? "no terminal"}`);
+    // A Herdr worktree gets its own unnamed space (named after its folder, nested under the repo's);
+    // everything else opens as a tab in this agent's space.
+    const [verb, req] = kind === "herdr"
+      ? ["space.new", { folder: opt.cwd, argv, ...(opt.name ? { tab: opt.name } : {}) }]
+      : ["tab.new", { ...(self?.space ? { space: self.space } : {}), folder: opt.cwd, argv, ...(opt.name ? { name: opt.name } : {}) }];
+    const made = JSON.parse(run("herdr-app", ["do", verb, JSON.stringify(req)]));
+    if (made.error || !made.terminal) fail(`${verb} failed: ${made.error ?? "no terminal"}`);
     try { run("hc", ["label", made.terminal, `maestro.parent=${me}`, ...(opt.name ? [`maestro.name=${opt.name}`] : [])]); } catch {}
     saveRecord(made.terminal, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null });
-    if (opt.worktree) writeJson(WORKTREES, { ...worktrees(), [opt.cwd]: { ...worktrees()[opt.cwd], terminal: made.terminal } });
-    out({ address: made.terminal, tab: made.tab, space: made.space, parent: me, ...(opt.worktree ? { worktree: opt.cwd } : {}) });
+    if (opt.worktree) writeJson(WORKTREES, { ...worktrees(), [opt.cwd]: { ...worktrees()[opt.cwd], terminal: made.terminal, ...(kind === "herdr" ? { space: made.space } : {}) } });
+    out({ address: made.terminal, tab: made.tab, space: made.space, parent: me, ...(opt.worktree ? { worktree: opt.cwd, kind } : {}) });
   },
 
   close([target]) {
@@ -216,29 +228,36 @@ const commands = {
     out({ terminal: ME, session: snap?.session_id ?? null, ready: checks.every((c) => c.ok), checks });
   },
 
-  // Worktrees Maestro created: list them, or remove one when it is clean and its worker is gone.
+  // Worktrees Maestro created (sibling or Herdr kind): list them, or remove one when it is
+  // clean and no live terminal (its worker or any other) is in it.
   worktree([op, target, ...flags]) {
     const all = worktrees();
+    const liveTerms = () => json("hc", ["ls", "--json"]).terminals?.map((t) => ({ address: t.address, cwd: t.cwd })) ?? [];
     if (!op || op === "ls") {
-      const live = new Set(json("hc", ["ls", "--json"]).terminals?.map((t) => t.address) ?? []);
-      out(Object.entries(all).map(([path, w]) => ({ path, branch: w.branch, owner: w.owner, terminal: w.terminal ?? null, live: w.terminal ? live.has(w.terminal) : false })));
+      const live = new Set(liveTerms().map((t) => t.address));
+      out(Object.entries(all).map(([path, w]) => ({ path, branch: w.branch, kind: wt.kindOf(w), owner: w.owner, terminal: w.terminal ?? null, live: w.terminal ? live.has(w.terminal) : false, ...(w.space ? { space: w.space } : {}) })));
       return;
     }
     if (op !== "rm" || !target) fail("usage: maestro worktree ls | rm <path|branch> [--force]");
     const entry = Object.entries(all).find(([p, w]) => p === target || w.branch === target);
     if (!entry) fail(`${target} is not a worktree Maestro created`, 3);
     const [path, w] = entry;
-    const live = new Set(json("hc", ["ls", "--json"]).terminals?.map((t) => t.address) ?? []);
-    if (w.terminal && live.has(w.terminal)) fail(`denied: its worker ${w.terminal} is still running`, 3);
-    if (existsSync(path)) {
-      const dirty = git(path, ["status", "--porcelain"]);
-      if (dirty && !flags.includes("--force")) fail(`denied: ${path} has uncommitted changes (use --force)`, 3);
-      git(w.repo, ["worktree", "remove", ...(flags.includes("--force") ? ["--force"] : []), path]);
+    const force = flags.includes("--force");
+    const there = existsSync(path);
+    const blocker = wt.removalBlocker({ path, entry: w, live: liveTerms(), dirty: there && Boolean(git(path, ["status", "--porcelain"])), force });
+    if (blocker) fail(`denied: ${blocker}`, 3);
+    if (wt.kindOf(w) === "herdr" && w.space) {
+      // Its space usually went with its last tab; close it only when no terminal is left in it.
+      try {
+        const sp = (JSON.parse(run("herdr-app", ["ls"])).spaces ?? []).find((s) => s.id === w.space);
+        if (sp && !(sp.tabs ?? []).some((tab) => (tab.terminals ?? []).length)) run("herdr-app", ["do", "space.close", JSON.stringify({ id: w.space, confirmed: true })]);
+      } catch {}
     }
+    if (there) git(w.repo, ["worktree", "remove", ...(force ? ["--force"] : []), path]);
     const next = { ...all };
     delete next[path];
     writeJson(WORKTREES, next);
-    out({ removed: path, branch: w.branch, note: "branch kept" });
+    out({ removed: path, branch: w.branch, kind: wt.kindOf(w), note: "branch kept" });
   },
 
   // This agent's icon in Maestro: a preset name or one Nerd Font glyph, with an optional #rrggbb color.
@@ -328,9 +347,13 @@ const commands = {
   maestro spawn [--name n] [--cwd d] [--task text | -- argv...]
                                        open a visible Copilot worker in a new tab of this space
                  [--worktree <branch>]  … in a new sibling worktree <repo>-<branch>
+                 [--herdr-space|--sibling]  … or Herdr's: ~/.herdr/worktrees/<repo>/<branch> in its own
+                                       space nested under the repo's (default: MAESTRO_WORKTREE or
+                                       shared maestro.worktreeKind = herdr|sibling, else sibling)
   maestro close <t>                    close a worker this agent (or its workers) launched
   maestro worktree ls | rm <path|branch> [--force]
-                                       worktrees Maestro created; rm only when clean and unattended
+                                       worktrees Maestro created (kind sibling|herdr); rm only when
+                                       clean and no live terminal is in it
   maestro notify <title> [body]        show the human a Herdr toast that jumps here
   maestro tag add|rm|set|ls [tags]     this agent's own tags
   maestro mood <${MOODS.join("|")}|clear>

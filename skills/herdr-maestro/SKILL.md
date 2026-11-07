@@ -16,6 +16,8 @@ everything in the Maestro layout (`cmd-shift-m`).
 | `maestro peers [--all]` | Agents in this space (or all spaces) with status. |
 | `maestro send <t> <message>` | Fire-and-forget message; arrives as a prompt prefixed `[maestro from tN …]`. |
 | `maestro spawn --name <n> --task "<scope>" [--cwd <dir>]` | Visible interactive Copilot worker in a new tab of this space. Prints its address. |
+| `maestro spawn --worktree <branch> [--herdr-space\|--sibling] …` | Worker on its own checkout: sibling `<repo>-<branch>` by default, or with `--herdr-space` Herdr's `~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's. |
+| `maestro worktree ls \| rm <path\|branch> [--force]` | Worktrees you made, with `kind`. `rm` refuses while any live terminal is in it or it is dirty (`--force` only discards changes, never a live terminal); the branch is kept. |
 | `maestro close <t>` | Close a worker this agent (or its workers) launched. Anything else is denied. |
 | `maestro notify <title> [body]` | Herdr toast for the human; clicking it focuses this agent. |
 | `maestro tag add\|rm\|set\|ls [tags]` | This agent's own tags (shown as `tag·agent`), normalized to slugs (`a-z0-9-`, ≤ 24 chars, ≤ 8). `ls` prints `{tag, color}`; colors are picked only by the human. |
