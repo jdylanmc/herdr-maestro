@@ -66,6 +66,8 @@ function place(cwd) {
   return { org: parts.length ? parts[parts.length - 1] : "~", repo: null };
 }
 
+const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+
 function ago(ms) {
   if (ms == null || Number.isNaN(ms)) return "";
   const s = Math.max(0, Math.round(ms / 1000));
@@ -558,14 +560,16 @@ export default class Maestro extends View {
       rows.push(h_flex().id(tid).ml(14 + depth * 14).pl(26).py(2).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => this.fold(tid, cx))
         .child(div().w(10).text_size(10).child(open ? "⌄" : "›"))
-        .child(`${tasks.length} internal task${tasks.length > 1 ? "s" : ""}`)
+        .child(`${tasks.length} subagent${tasks.length > 1 ? "s" : ""}`)
+        .children(["running", "idle", "failed"].map((st) => [st, tasks.filter((r) => r.status === st).length]).filter(([, n]) => n)
+          .map(([st, n]) => div().text_color(st === "running" ? t.working : st === "failed" ? t.blocked : t.dim).child(`· ${n} ${st}`)))
         .when(!open, (el) => el.child(h_flex().gap(4).children(tasks.slice(0, 8).map((r) => this.taskGlyph(t, r))))));
       if (open) tasks.forEach((r, i) => rows.push(this.taskRow(t, x, r, now, depth, i === tasks.length - 1)));
     }
     for (const k of kids) this.pushAgent(t, rows, order, k, kidsOf, now, depth + 1);
   }
 
-  focus(x) { if (find(layout(), "work-stack")?.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
+  focus(x) { const st = find(layout(), "work-stack"); if (st && st.active && st.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
   title(x) { return x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? (x.a.title ?? "").replace(/ - GitHub Copilot$/, "") ?? x.a.address; }
   task(x) {
     const name = x.snap?.session_name || (x.a.title ?? "").replace(/ - GitHub Copilot$/, "");
@@ -705,17 +709,26 @@ export default class Maestro extends View {
 
   taskGlyph(t, r) {
     if (r.status === "running") return svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900);
+    if (r.status === "idle") return div().size(8).mx(2).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
     if (r.status === "failed") return div().text_size(12).text_color(t.blocked).child("⊗");
     if (r.status === "cancelled") return div().text_size(12).text_color(t.blocked).child("‖");
     return div().text_size(12).text_color(t.muted).child("✓");
   }
 
   taskRow(t, x, r, now, depth, last) {
-    return h_flex().id(`a-${x.a.address}-${r.id}`).ml(14 + depth * 14).pl(30 + r.depth * 14).pr(10).h(24).flex_none().gap(0).items_center().text_size(12.5)
-      .child(div().self_start().w(10).h(last ? 12 : 24).mr(6).flex_none().border_l(1).border_color(t.border)
+    const live = r.status === "running";
+    const sub = [r.activity && live ? r.activity : null, r.description].filter(Boolean).join(" · ");
+    const age = r.status === "idle" ? `idle ${ago(now - (r.lastAt ?? r.ended ?? now))}` : ago((r.status === "running" ? now : r.ended ?? now) - r.started);
+    const stats = [r.tools ? `${r.tools} tools` : null, age].filter(Boolean).join(" · ");
+    const tip = [r.name, r.description, r.status === "idle" ? "Idle: can still be messaged" : null, r.kind && r.kind !== r.name ? r.kind : null, [r.model, r.effort].filter(Boolean).join(" · "), r.mode, r.turns > 1 ? `${r.turns} turns` : null, r.tokens ? `${compact(r.tokens)} tokens` : null, stats].filter(Boolean).join("\n");
+    return h_flex().id(`a-${x.a.address}-${r.id}`).ml(14 + depth * 14).pl(30 + r.depth * 14).pr(10).h(sub ? 36 : 24).flex_none().gap(0).items_center().text_size(12.5)
+      .tooltip(tip)
+      .child(div().self_start().w(10).h(last ? 12 : sub ? 36 : 24).mr(6).flex_none().border_l(1).border_color(t.border)
         .child(div().mt(11).w(8).border_b(1).border_color(t.border)))
-      .child(div().flex_1().min_w(0).truncate().text_color(r.status === "running" ? t.foreground : t.muted).child(r.name))
-      .child(div().pr(6).text_size(11).text_color(t.dim).child(ago((r.ended ?? now) - r.started)))
+      .child(v_flex().flex_1().min_w(0)
+        .child(div().truncate().text_color(live ? t.foreground : t.muted).child(r.name))
+        .when(Boolean(sub), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(sub))))
+      .child(div().pr(6).text_size(11).text_color(t.dim).child(stats))
       .child(this.taskGlyph(t, r));
   }
 
