@@ -36,6 +36,8 @@ function makeWorktree(from, branch, owner) {
   return path;
 }
 
+// Same canonical slug as the tag editor: lowercase [a-z0-9-], at most 24 characters.
+const slug = (x) => String(x).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).replace(/-+$/, "");
 const out = (v) => process.stdout.write(typeof v === "string" ? v + "\n" : JSON.stringify(v, null, 2) + "\n");
 function fail(msg, code = 1) { process.stderr.write(`maestro: ${msg}\n`); process.exit(code); }
 const run = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -154,15 +156,19 @@ const commands = {
     out({ queued: id });
   },
 
+  // Colors belong to the human (picked in the tag editor); agents only read them.
   tag([op, ...tags]) {
     const me = needMe();
     const cur = new Set(recordOf(me).tags ?? []);
-    if (op === "add") tags.forEach((x) => cur.add(x.toLowerCase()));
-    else if (op === "rm") tags.forEach((x) => cur.delete(x.toLowerCase()));
-    else if (op === "set") { cur.clear(); tags.forEach((x) => cur.add(x.toLowerCase())); }
+    const slugs = tags.flatMap((x) => x.split(",")).map(slug).filter(Boolean);
+    if (op === "add") slugs.forEach((x) => cur.add(x));
+    else if (op === "rm") slugs.forEach((x) => cur.delete(x));
+    else if (op === "set") { cur.clear(); slugs.forEach((x) => cur.add(x)); }
     else if (op !== "ls") fail("usage: maestro tag add|rm|set|ls [tags...]");
-    if (op !== "ls") saveRecord(me, { tags: [...cur].slice(0, 8) });
-    out([...cur]);
+    if (op !== "ls") { saveRecord(me, { tags: [...cur].slice(0, 8) }); out([...cur].slice(0, 8)); return; }
+    let colors = {};
+    try { colors = JSON.parse(readFileSync(join(HOME, "shared.json"), "utf8"))["maestro.tagColors"] ?? {}; } catch {}
+    out([...cur].map((tag) => ({ tag, color: colors[tag] ?? null })));
   },
 
   mood([m]) {

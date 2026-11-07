@@ -824,7 +824,16 @@ export default class Maestro extends View {
   openTags() {
     const f = focused();
     const x = this.sessions().find((y) => y.a.address === f?.terminal);
-    if (x) openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: x.snap?.session_name ?? x.a.address } });
+    if (x) openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: x.snap?.session_name ?? x.a.address, terminal: x.a.address } });
+  }
+
+  // A tag's color belongs to its slug: the human's pick in shared("maestro.tagColors")
+  // (a theme color name), else a hash over the ANSI hues (same as mods/maestro-tags).
+  tagColor(t, slug) {
+    const name = (shared("maestro.tagColors") ?? {})[slug];
+    if (name && t[name]) return t[name];
+    const hues = [t.ansi6, t.ansi3, t.ansi4, t.ansi5, t.ansi2, t.ansi1];
+    return hues[hash(slug) % hues.length];
   }
 
   boardColumn(x) {

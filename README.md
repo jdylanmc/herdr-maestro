@@ -35,6 +35,11 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 - Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
   its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
+- **Tags** are short slugs (lowercase `a-z0-9-`, ≤ 24 chars, ≤ 8 per session). `cmd-shift-t` opens
+  the tag editor: type to add (Enter, comma or space), × or Backspace removes, click a known tag to
+  add it, click one of yours to pick its color. A color belongs to the slug everywhere and only the
+  human picks it: `shared("maestro.tagColors")` maps slug → Herdr theme color name (`ansi1`…`ansi6`,
+  `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there.
 
 **Pets** are [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`) and cmux Maestro's own
@@ -63,7 +68,7 @@ maestro spawn [--name n] [--cwd d] [--worktree <branch>] [--task text | -- argv.
 maestro close <t>                       # only workers this agent (or its workers) launched
 maestro worktree ls | rm <path|branch> [--force]
 maestro notify <title> [body]           # Herdr toast that focuses the agent when clicked
-maestro tag add|rm|set|ls [tags]
+maestro tag add|rm|set|ls [tags]        # ls shows each tag's human-picked color
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
 maestro icon <preset|glyph> [color]     # robot, code, bug, eye, shield, compass, brush, …
