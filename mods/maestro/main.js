@@ -115,6 +115,7 @@ export default class Maestro extends View {
     if (this.view === "themes") { this.handle.focus(); cx.timer.after(400, () => this.handle.focus()); return; }
     this.folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
+    this.gitBusy = new Set();   // machines with a git refresh in flight (null is local)
     this.pets = [];             // rendered pets (data/maestro/pets/index.json)
     this.choices = null;        // data/maestro/pets/choices.json, once read
     this.screens = new Map();   // terminal address -> { lines, prompt, at, busy }; memory only, never written
@@ -676,24 +677,36 @@ export default class Maestro extends View {
     const want = new Map();
     for (const x of list) if (x.cwd) want.set(x.machine ? `${x.machine}:${x.cwd}` : x.cwd, { c: x.cwd, on: x.machine ?? null });
     const due = [...want].filter(([k]) => now - (this.git.get(k)?.at ?? 0) > 20000);
-    if (!due.length || this.gitBusy) return;
-    this.gitBusy = true;
-    this.cx?.spawn(async (cx) => {
-      for (const [key, { c, on }] of due) {
-        let v = null;
+    const by = new Map();
+    for (const entry of due) {
+      const on = entry[1].on;
+      if (!by.has(on)) by.set(on, []);
+      by.get(on).push(entry);
+    }
+    if (!this.cx) return;
+    for (const [on, folders] of by) {
+      if (this.gitBusy.has(on)) continue;
+      this.gitBusy.add(on);
+      this.cx.spawn(async (cx) => {
         try {
-          const r = await exec("git", ["-C", c, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel", "--abbrev-ref", "HEAD"], on ? { on } : undefined);
-          if (r.code === 0) {
-            const [common, top, branch] = r.stdout.trim().split("\n");
-            const main = common.replace(/\/\.git\/?$/, "");
-            v = { repo: main.split("/").pop(), main, top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
+          for (const [key, { c }] of folders) {
+            let v = null;
+            try {
+              const r = await exec("git", ["-C", c, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel", "--abbrev-ref", "HEAD"], on ? { on } : undefined);
+              if (r.code === 0) {
+                const [common, top, branch] = r.stdout.trim().split("\n");
+                const main = common.replace(/\/\.git\/?$/, "");
+                v = { repo: main.split("/").pop(), main, top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
+              }
+            } catch {}
+            this.git.set(key, { v, at: Date.now() });
           }
-        } catch {}
-        this.git.set(key, { v, at: Date.now() });
-      }
-      this.gitBusy = false;
-      cx.notify();
-    });
+        } finally {
+          this.gitBusy.delete(on);
+          cx.notify();
+        }
+      });
+    }
   }
 
   // Spaces in Herdr's order, worktree spaces under their repo's main-checkout space (as Herdr's spaces list).

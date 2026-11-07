@@ -16,6 +16,8 @@ function view(host = {}) {
   v.fallback = new Map();
   v.remoteBusy = new Set();
   v.machineFor = (a) => machineOf(a.address);
+  v.git = new Map();
+  v.gitBusy = new Set();
   return v;
 }
 
@@ -91,4 +93,33 @@ test("remote tails preserve the space-machine fallback without treating bare add
   v.tail = async (id, on) => { calls.push([id, on]); };
   await v.refreshRemote({ notify() {} });
   assert.deepEqual(calls, [["remote", "box"]]);
+});
+
+test("a stalled remote git job neither blocks new local folders nor overlaps on its machine", async () => {
+  let release;
+  const stalled = new Promise((resolve) => { release = resolve; });
+  const v = view({
+    exec: async (_command, args, options) => {
+      if (options?.on === "slow") await stalled;
+      return { code: 0, stdout: `${args[1]}/.git\n${args[1]}\nfeature\n` };
+    },
+  });
+  const jobs = [];
+  let notifications = 0;
+  v.cx = { spawn: (body) => { jobs.push(body({ notify: () => { notifications++; } })); } };
+  v.refreshGit([{ cwd: "/remote", machine: "slow" }]);
+  v.refreshGit([{ cwd: "/remote", machine: "slow" }, { cwd: "/local" }]);
+  assert.equal(jobs.length, 2);
+  await jobs[1];
+  assert.equal(v.gitOf("/local").branch, "feature");
+  assert.equal(v.gitOf("/remote", "slow"), null);
+  assert.ok(v.gitBusy.has("slow"));
+  assert.equal(notifications, 1);
+  v.refreshGit([{ cwd: "/another-local" }]);
+  await jobs[2];
+  assert.equal(v.gitOf("/another-local").repo, "another-local");
+  release();
+  await jobs[0];
+  assert.equal(v.gitOf("/remote", "slow").repo, "remote");
+  assert.equal(v.gitBusy.size, 0);
 });
