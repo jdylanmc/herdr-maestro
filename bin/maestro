@@ -8,6 +8,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
+
+const HELPER = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "mods", "maestro", "helper.mjs");
 
 const HOME = process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app");
 const DATA = join(HOME, "data", "maestro");
@@ -120,7 +124,7 @@ const commands = {
     }
     if (opt.worktree) opt.cwd = makeWorktree(opt.cwd, opt.worktree, me);
     const self = world().find((t) => t.address === me);
-    const argv = opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])];
+    const argv = ["node", HELPER, "run", ...(opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])])];
     const req = { ...(self?.space ? { space: self.space } : {}), folder: opt.cwd, argv, ...(opt.name ? { name: opt.name } : {}) };
     const made = JSON.parse(run("herdr-app", ["do", "tab.new", JSON.stringify(req)]));
     if (made.error || !made.terminal) fail(`tab.new failed: ${made.error ?? "no terminal"}`);

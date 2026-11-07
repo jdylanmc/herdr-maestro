@@ -42,6 +42,8 @@ const BOARD = [
 const sessionRoot = () => `${home()}/.copilot/session-state`;
 const HELPER = () => `${appHome()}/mods/maestro/helper.mjs`;
 const helper = (...args) => exec("node", [HELPER(), ...args.map(String)]);
+const clean = (argv) => ["node", HELPER(), "run", ...argv];
+const copilotArgv = (...extra) => clean([...(shared("maestro.argv") ?? ["copilot", "--yolo"]), ...extra]);
 
 // ~/git/<org>/<repo>/… or ~/git/_opensource/<org>/<repo>/…; else the folder's own name.
 function place(cwd) {
@@ -513,7 +515,7 @@ export default class Maestro extends View {
       .child(div().text_size(11).text_color(t.dim).child(String(n)))
       .child(div().flex_1())
       .child(div().id(`new-${key}`).px(6).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-        .on_click(() => run("tab.new", { ...(space ? { space } : {}), ...(where ? { folder: where } : {}), argv: shared("maestro.argv") ?? ["copilot", "--yolo"] }))
+        .on_click(() => run("tab.new", { ...(space ? { space } : {}), ...(where ? { folder: where } : {}), argv: copilotArgv() }))
         .child("+ copilot"));
   }
 
@@ -572,7 +574,7 @@ export default class Maestro extends View {
 
   recentRow(t, r, dismissed, now) {
     const where = place(r.cwd);
-    const resume = () => run("tab.new", { ...(focused()?.space ? { space: focused().space } : {}), ...(r.cwd ? { folder: r.cwd } : {}), argv: [...(shared("maestro.argv") ?? ["copilot", "--yolo"]), "--resume", r.id] });
+    const resume = () => run("tab.new", { ...(focused()?.space ? { space: focused().space } : {}), ...(r.cwd ? { folder: r.cwd } : {}), argv: copilotArgv("--resume", r.id) });
     return h_flex().id(`r-${r.id}`).px(8).py(4).gap(8).items_center().rounded(8).text_size(12)
       .hover((st) => st.bg(t.hover))
       .child(div().size(6).rounded(3).bg(t.idle))

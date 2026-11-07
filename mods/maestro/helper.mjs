@@ -6,9 +6,10 @@
 //   helper.mjs recent <dir> <limit> <sinceMs> -> JSON [{ id, mtime }] newest first
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
+//   helper.mjs run <argv...>                 -> runs argv without inherited CMUX_* variables
 
 import { openSync, readSync, closeSync, fstatSync, readdirSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { join } from "node:path";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -72,7 +73,18 @@ function procs() {
   process.stdout.write(JSON.stringify(pairs));
 }
 
-try {
+// A herdr-core started from a cmux tab hands cmux's environment to every terminal, which
+// makes cmux integrations act as if they were inside cmux.
+function runClean(argv) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CMUX_")));
+  const child = spawn(argv[0], argv.slice(1), { stdio: "inherit", env, shell: process.platform === "win32" });
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => child.kill(sig));
+  child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+  child.on("error", (e) => { process.stderr.write(`${argv[0]}: ${e.message}\n`); process.exit(127); });
+}
+
+if (cmd === "run") runClean(args);
+else try {
   if (cmd === "tail") tail(args[0], args[1], args[2]);
   else if (cmd === "recent") recent(args[0], args[1] ?? 60, args[2] ?? 0);
   else if (cmd === "locks") locks(args[0]);

@@ -77,6 +77,8 @@ Workers are always visible interactive tabs. Worktrees are sibling checkouts
 - `mods/maestro/helper.mjs` tails each bound session's `events.jsonl` by byte offset for
   subagents, attention causes, model/effort and schedules.
 - Lineage and names are herdr-core labels (`maestro.parent`, `maestro.name`).
+- Sessions Maestro launches start through `helper.mjs run`, which drops `CMUX_*` variables a
+  cmux-launched herdr-core would otherwise pass on.
 
 ## Layout
 
