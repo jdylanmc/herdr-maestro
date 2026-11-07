@@ -102,6 +102,27 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Evidence:** a temporary loopback machine (`hc machine add --via 'sh -c' --temp --session <scratch>`): `hc exec --on` ran the probe and `helper.mjs procs`/`locks`; `hc get <machine>/t1 --json` returned `foreground.pid`. Not measured: real ssh latency, Windows remotes, the sidebar with a real remote space (temporary machines get no spaces).
 **Closes with:** `watchFolder`/`readdir` with `{ on }`, or a mod-shipped helper Herdr installs on each machine.
 
+### G-18 - No CLI route to Herdr's known agents
+
+**Wanted:** `maestro spawn --agent <name>` resolving names against the same agent table as Herdr's menus.
+**Blocked by:** `knownAgents()` is mod-only; `herdr-app --help`, `herdr-app commands` and `hc --help` list no agent or program table (`hc templates` is empty), and the built-in 120-program table is not on disk (`programs.json` holds only overrides).
+**Shipped:** the Maestro mod and its launch menu cache `knownAgents()` (key, name, run, installed) in `shared("maestro.knownAgents")`; the CLI reads it from `shared.json`, else a fallback table (`copilot`, `claude`, `codex`, `cursor-agent`, `gemini`, `opencode`, `pi`, `amp`) and errors with the known names.
+**Closes with:** `herdr-app agents --json` (or `knownAgents` over `herdr-app do`).
+
+### G-19 - Long app-home paths exceed the macOS socket limit
+
+**Wanted:** validate a mod in an isolated Herdr window under a session artifact directory.
+**Evidence:** a 105-byte `<app-home>/herdr-app.sock` path made `herdr-app status`, `do` and `shot` fail with "path must be shorter than SUN_LEN".
+**Shipped:** rendering validation uses a short temporary app home instead.
+**Closes with:** placing the control socket under a short runtime directory independently of `HERDR_APP_HOME`.
+
+### G-20 - Background launches have no provider-neutral first task
+
+**Wanted:** combine `maestro spawn --bg --agent <name>` with `--task` for non-Copilot agents.
+**Evidence:** `hc run --help` exposes argv and templates, but no first-task option; Herdr's `task` routing is available on `tab.new` and `space.new`, not raw background launches.
+**Shipped:** Copilot background tasks retain `-i`. Other agents can start background sessions without a task, or use explicit provider argv; generic background tasks fail before creating a checkout rather than silently losing the prompt.
+**Closes with:** provider-neutral task routing for `hc run`.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

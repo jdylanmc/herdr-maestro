@@ -4,12 +4,13 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings } from "herdr";
+import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings, knownAgents } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
 import { liveAgents } from "./live.js";
 import { pinFirst, alertStep, NEEDS_YOU } from "./alerts.js";
+import { isCopilot } from "./agentlib.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
@@ -55,6 +56,8 @@ const HELPER = () => `${appHome()}/mods/maestro/helper.mjs`;
 const helper = (...args) => exec("node", [HELPER(), ...args.map(String)]);
 const clean = (argv) => ["node", HELPER(), "run", ...argv];
 const copilotArgv = (...extra) => clean([...(shared("maestro.argv") ?? ["copilot", "--yolo"]), ...extra]);
+// Another coding agent (Claude Code, Codex, …): no status-line bridge or events.jsonl, so only Herdr's view of it.
+const otherAgent = (a) => { const k = a?.app ?? a?.program?.key; return Boolean(k) && !isCopilot({ key: k }); };
 
 // ~/git/<org>/<repo>/… or ~/git/_opensource/<org>/<repo>/…; else the folder's own name.
 function place(cwd) {
@@ -123,6 +126,10 @@ export default class Maestro extends View {
     this.remote = new Map();    // machine -> { v: probe answer or null, at, busy }
     this.remoteBusy = new Set(); // machines with a snapshot/binding/tail pass in flight
     cx.spawn(async (cx) => { await this.loadPets(); cx.notify(); });
+    // Herdr's startable agents, for the launch menu and `maestro spawn --agent` (reads shared.json).
+    if (this.primary) cx.spawn(async () => {
+      try { setShared("maestro.knownAgents", { at: Date.now(), agents: (await knownAgents()).map(({ key, name, icon, tint, run, installed }) => ({ key, name, icon, tint, run, installed })) }); } catch {}
+    });
     cx.spawn(async (cx) => {
       for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
       await this.refresh();
@@ -274,7 +281,7 @@ export default class Maestro extends View {
 
   // Fallback binding: inuse.<pid>.lock owners walked up to each terminal's foreground pid.
   async bindByAncestry() {
-    const unbound = this.live().filter((a) => !a.address.includes("/") && !this.snaps.get(a.address)?.session_id && !this.fallback.has(a.address));
+    const unbound = this.live().filter((a) => !otherAgent(a) && !a.address.includes("/") && !this.snaps.get(a.address)?.session_id && !this.fallback.has(a.address));
     if (!unbound.length) return;
     let locks, pairs;
     try {
@@ -403,21 +410,22 @@ export default class Maestro extends View {
     }
   }
 
-  sessionFor(addr) {
+  sessionFor(addr, agent = this.live().find((a) => a.address === addr)) {
+    if (otherAgent(agent)) return null;
     return this.snaps.get(addr)?.session_id ?? this.fallback.get(addr) ?? null;
   }
 
   async tailAll(machine = null) {
     // Other views (the pet pokedex) key sessions the same way: session id, else terminal.
     if (this.primary) {
-      const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address) ?? a.address]));
+      const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address, a) ?? a.address]));
       if (JSON.stringify(keys) !== JSON.stringify(shared("maestro.sessionKeys") ?? {})) setShared("maestro.sessionKeys", keys);
     }
     const ids = new Map();
     for (const a of this.live()) {
       const on = this.machineFor(a);
       if (on !== machine) continue;
-      const id = this.sessionFor(a.address);
+      const id = this.sessionFor(a.address, a);
       if (id) ids.set(id, on);
     }
     await Promise.all([...ids].map(([id, on]) => this.tail(id, on)));
@@ -463,8 +471,8 @@ export default class Maestro extends View {
     const spMachine = new Map(spaces().map((sp) => [sp.id, sp.machine ?? null]));
     return this.live().map((a) => {
       const pane = byPane.get(a.pane);
-      const snap = this.snaps.get(a.address);
-      const id = this.sessionFor(a.address);
+      const snap = otherAgent(a) ? null : this.snaps.get(a.address);
+      const id = this.sessionFor(a.address, a);
       const L = id ? this.logs.get(id) : null;
       const cwd = snap?.cwd ?? pane?.cwd ?? a.cwd ?? null;
       const key = a.space_name || "";
@@ -763,6 +771,8 @@ export default class Maestro extends View {
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
       .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: this.argvFor(sp.machine) }),
         svg("mods/workspace-chrome/plus.svg").size(13)))
+      .child(btn("spa", "Start another agent here…", () => this.openLaunch(sp.id, mine[0]?.cwd ?? sp.folder ?? null),
+        svg("mods/workspace-chrome/chevron-down.svg").size(11)))
       .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
@@ -867,7 +877,26 @@ export default class Maestro extends View {
       .child(v_flex().flex_1().min_w(0)
         .child(div().truncate().text_size(13).font_semibold().child(name))
         .when(Boolean(detail), (el) => el.child(div().truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
-      .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)));
+      .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
+      .child(this.launchButtons(t, fid, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null));
+  }
+
+  // A worktree's + starts Copilot in it; the chevron opens the menu of every agent Herdr knows.
+  launchButtons(t, id, space, folder) {
+    const btn = (k, tip, on, child) => div().id(`${k}-${id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
+    return h_flex().flex_none().gap(1)
+      .child(btn("wtn", "New Copilot in this worktree", () => run("tab.new", { ...(space ? { space } : {}), ...(folder ? { folder } : {}), argv: this.argvFor(spaces().find((sp) => sp.id === space)?.machine) }),
+        svg("mods/workspace-chrome/plus.svg").size(12)))
+      .child(btn("wta", "Start another agent in this worktree…", () => this.openLaunch(space, folder),
+        svg("mods/workspace-chrome/chevron-down.svg").size(10)));
+  }
+
+  openLaunch(space, folder) {
+    const machine = spaces().find((sp) => sp.id === space)?.machine;
+    const helper = machine ? this.remoteInfo(machine)?.helper ?? null : null;
+    openOverlay({ mod: "maestro-launch", kind: "popup", at: "pointer", width: 240, height: 300, props: { space, folder, helper } });
   }
 
   // A folded space or worktree: its agents' icons and state cues in one row, each focusing its agent.
@@ -905,7 +934,7 @@ export default class Maestro extends View {
   }
 
   focus(x) { const st = find(layout(), "work-stack"); if (st && st.active && st.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
-  title(x) { return x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? (x.a.title ?? "").replace(/ - GitHub Copilot$/, "") ?? x.a.address; }
+  title(x) { return x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? ((x.a.title ?? "").replace(/ - GitHub Copilot$/, "") || x.a.program?.name || x.a.address); }
   task(x) {
     const name = x.snap?.session_name || (x.a.title ?? "").replace(/ - GitHub Copilot$/, "");
     return name && name !== this.title(x) ? name : x.a.tab_name ?? "";
@@ -914,6 +943,10 @@ export default class Maestro extends View {
   // The session's icon: an agent-chosen Nerd Font glyph and color, else one picked from its name.
   icon(t, x, size = 18) {
     const key = x.rec.icon ?? null;
+    // Other agents without a Maestro icon show their program's icon, as Herdr's agent lists do.
+    const p = !key && otherAgent(x.a) ? x.a.program : null;
+    if (p?.icon) return div().w(size + 4).flex_none().flex().items_center().justify_center()
+      .child(p.tint ? svg(p.icon).size(size).text_color(t.foreground) : image(p.icon).w(size).h(size));
     const glyph = key ? (ICONS[key] ?? key) : Object.values(ICONS)[hash(x.tagKey) % Object.keys(ICONS).length];
     const color = themed(t, x.rec.color) ?? palette(t)[hash(x.tagKey + "c") % palette(t).length];
     return div().w(size + 4).flex_none().text_center().font_family(NERD).text_size(size).text_color(color).child(glyph);
@@ -1017,6 +1050,7 @@ export default class Maestro extends View {
             .child(div().truncate().text_size(12).text_color(t.muted).child(`${STATUS_WORD[x.failed ? "failed" : a.status] ?? a.status} · ${a.address}`)))))
       .when(Boolean(why), (el) => el.child(div().px(8).py(4).rounded(6).bg(t.blocked + "22").text_size(12).text_color(t.blocked).child(why)))
       .children([
+        kv("Agent", otherAgent(a) ? a.program?.name ?? a.app : null),
         kv("Model", model ? (effort && !model.includes(" · ") ? `${model} · ${effort}` : model) : null),
         kv("Context", ctx != null ? `${ctx}%` : null),
         kv("AIC", snap?.ai_used?.formatted ?? null),

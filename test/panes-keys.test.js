@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
-import { machineOf, spaceEntries } from "../mods/maestro/machines.js";
+import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
 
 function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
+  const overlays = [];
   const elements = new Map();
   const element = () => {
     const events = {};
@@ -37,7 +38,10 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spaces: () => spaceList,
     machines: () => [],
     exec: execImpl,
-    nestSpaces, spacePlace, machineOf, spaceEntries,
+    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv,
+    appHome: () => "/local-herdr",
+    openOverlay: (spec) => { overlays.push(spec); },
+    closeOverlay() {},
     layout: () => null,
     setAgentOrder() {},
     agents: () => [],
@@ -56,11 +60,12 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spawn: (task) => tasks.push(task),
     timer: { every() {}, after() {} },
     notify() {},
+    stop_propagation() {},
   };
   mod.init(modProps, cx);
   tasks.length = 0;
   return {
-    mod, tasks, commands, elements, cx,
+    mod, tasks, commands, overlays, elements, cx,
     setToken(value) { token = value; },
     click(id, hostingPane) {
       let stopped = false;
@@ -70,6 +75,40 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
       events.click({}, cx);
     },
   };
+}
+
+for (const [machine, helper] of [[null, null], ["box", "/remote-herdr/mods/maestro/helper.mjs"], ["box", null], ["box", "C:\\Remote Herdr\\mods\\maestro\\helper.mjs"]]) {
+  test(`agent menu and worktree launches use the target helper (${machine ?? "local"}, ${helper ?? "none"})`, () => {
+    const space = { id: machine ? "box/s1" : "s1", machine };
+    const board = loadMod("maestro", { spaceList: [space] });
+    board.mod.remoteInfo = (on) => {
+      assert.equal(on, machine);
+      return helper ? { helper } : null;
+    };
+    const wrapper = machine
+      ? helper ? ["node", helper, "run"] : []
+      : ["node", "/local-herdr/mods/maestro/helper.mjs", "run"];
+    board.mod.openLaunch(space.id, "/checkout");
+    const launcher = loadMod("maestro-launch", {
+      spaceList: [space],
+      modProps: { ...board.overlays[0].props, overlay: "launcher" },
+    });
+    for (const agent of [{ key: "copilot", run: ["copilot"] }, { key: "claude", run: ["claude", "--example"] }]) {
+      launcher.mod.start(agent);
+      const command = launcher.commands.at(-1);
+      assert.equal(command.command, "tab.new");
+      assert.equal(command.args.space, space.id);
+      assert.equal(command.args.folder, "/checkout");
+      assert.deepEqual(Array.from(command.args.argv), [...wrapper, ...(agent.key === "copilot" ? ["copilot", "--yolo"] : agent.run)]);
+    }
+    board.mod.launchButtons({}, "worktree", space.id, "/checkout");
+    board.click("wtn-worktree", null);
+    const command = board.commands.at(-1);
+    assert.equal(command.command, "tab.new");
+    assert.equal(command.args.space, space.id);
+    assert.equal(command.args.folder, "/checkout");
+    assert.deepEqual(Array.from(command.args.argv), [...wrapper, "copilot", "--yolo"]);
+  });
 }
 
 test("keyboard navigation preserves nested worktree rows and refreshes empty spaces", () => {

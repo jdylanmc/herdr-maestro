@@ -1,9 +1,9 @@
 # Herdr-Maestro
 
 Agent orchestration and observability for the [Herdr app](https://herdr.dev), built
-natively as Herdr mods on top of `herdr-core` (`hc`). It shows every GitHub Copilot CLI
-session in Herdr, its workers and subagents, what each one costs, and what it needs
-from you, and gives agents a small CLI to coordinate with each other.
+natively as Herdr mods on top of `herdr-core` (`hc`). It shows every coding agent in Herdr
+(GitHub Copilot CLI in most depth: its workers and subagents, what each one costs), what
+each needs from you, and gives agents a small CLI to coordinate with each other.
 
 > Status: alpha, used daily on macOS. Linux and Windows paths are written but untested.
 
@@ -62,6 +62,11 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there;
   the folder button picks a folder first and starts Copilot in it.
+  A worktree's `+` starts Copilot in that worktree. The chevron beside either `+` lists every agent
+  Herdr knows (`knownAgents()`: Claude Code, Codex, …, installed ones first) and starts the one you pick there.
+- **Any agent:** every terminal Herdr counts as an agent gets a card, status, task, tags, pet (mood from
+  its status), focus and a hover preview; without a Maestro icon it shows its program's icon. Model,
+  context, AIC, subagents and Beats come from Copilot's status line and session log, so only Copilot shows them.
 - **Pins**: hover a card for its pin (Herdr's `terminal.pin`, shared with Herdr's own agent list and
   every client); pinned agents sort first in their group and show a small pin.
 - **Alerts** (header, both off by default, kept in `shared("maestro.sounds")` / `shared("maestro.autoSettle")`):
@@ -118,7 +123,8 @@ Copilot agents learn these from the bundled `herdr-maestro` skill.
 ```text
 maestro whoami | peers [--all]
 maestro send <t> <message>
-maestro spawn [--name n] [--cwd d] [--worktree <branch> [--herdr-space|--sibling]] [--bg] [--task text | -- argv...]
+maestro spawn [--name n] [--cwd d] [--worktree <branch> [--herdr-space|--sibling]] [--bg] [--agent a] [--task text | -- argv...]
+                                        # --agent claude|codex|…: any agent Herdr knows; default Copilot
 maestro close <t>                       # only workers this agent (or its workers) launched
 maestro wait [<t>...] [--any|--all]     # this agent's workers by default; replaces sleeping/polling
 maestro interrupt <t>                   # stop a worker's turn (own workers only)
@@ -142,6 +148,8 @@ Workers are interactive tabs, or pane-less sub-agents with `--bg`. Worktrees are
 `~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's, unless `--bg`
 keeps the worker pane-less in its parent's space. `worktree ls` shows
 each one's kind; `rm` refuses while its worker or any live terminal is in it, or the tree is dirty.
+Background `--task` routing supports Copilot; other agents need explicit provider argv
+(`-- argv...`) or a visible launch so Herdr can deliver the task.
 
 ## How it works
 
@@ -162,7 +170,7 @@ each one's kind; `rm` refuses while its worker or any live terminal is in it, or
 
 ## Layout
 
-- `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`: Herdr app mods
+- `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`, `mods/maestro-launch/` (agent menu): Herdr app mods
   (`mods/maestro-pets/petlib.js` is a copy of `mods/maestro/petlib.js`; mods cannot import across folders).
 - `layouts/maestro.json`: the Maestro layout.
 - `bin/`: `maestro` CLI and the status-line bridge.
