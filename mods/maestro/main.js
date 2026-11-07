@@ -8,6 +8,7 @@ import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
+import { liveAgents } from "./live.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 import { nestSpaces, spacePlace } from "./wtlib.js";
 
@@ -287,28 +288,9 @@ export default class Maestro extends View {
     }
   }
 
-  // Copilot agents with panes, plus pane-less hc sub-agents shaped like AgentInfo.
+  // Agents with panes, plus pane-less workers shaped like AgentInfo.
   live() {
-    const shown = agents().map((a) => ({ ...a }));
-    const have = new Set(shown.map((a) => a.address));
-    const byAddr = new Map(shown.map((a) => [a.address, a]));
-    for (const k of terminals()) {
-      if (have.has(k.address) || k.state !== "live") continue;
-      if (!(k.report?.app ?? k.agent) || !k.parent) continue;
-      const parent = byAddr.get(k.parent);
-      const status = k.status === "error" ? "blocked" : ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : "idle";
-      shown.push({ address: k.address, pane: null, space: parent?.space ?? null, app: k.report?.app ?? k.agent, space_name: parent?.space_name ?? "", tab_name: k.name ?? k.address, status, title: k.title || k.name || k.address, handle: k.name ?? null, seq: 0, focused: false, parent: k.parent ?? null, cwd: k.cwd });
-    }
-    const labels = new Map(terminals().map((k) => [k.address, k.labels ?? {}]));
-    for (const a of shown) {
-      const r = this.records.get(a.address);
-      const l = labels.get(a.address) ?? {};
-      const parent = r?.parent ?? l["maestro.parent"];
-      const name = r?.name ?? l["maestro.name"];
-      if (parent) a.parent = parent;
-      if (name) a.handle = name;
-    }
-    return shown;
+    return liveAgents(agents(), terminals(), this.records);
   }
 
   sessions() {

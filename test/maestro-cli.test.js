@@ -28,7 +28,7 @@ const a = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify([name, ...a]) + "\\n");
 const T = JSON.parse(process.env.FAKE_TERMINALS);
 const say = (v) => process.stdout.write(JSON.stringify(v));
-if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [] } : { ok: true });
+if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [{ id: "s1", name: "Workspace", tabs: [{ id: "tab1", name: "Parent", terminals: [{ terminal: "t1" }] }] }] } : { ok: true });
 else if (a[0] === "ls") say({ terminals: T.map(({ labels, ...t }) => t) });
 else if (a[0] === "get") say(T.find((t) => t.address === a[1]) ?? {});
 else if (a[0] === "run") say({ address: "t7", state: "live" });
@@ -102,4 +102,20 @@ test("wait: children by default plus tab workers; explicit targets; --any return
   assert.equal(maestro(["wait", "--sometimes"]).code, 1);
   assert.equal(maestro(["wait", "--children", "most"]).code, 1);
   assert.ok(!existsSync(join(DIR, "home", "data", "maestro", "agents", "t1.json")), "wait writes nothing");
+});
+
+test("wait validates every explicit target before starting any hc wait", { skip }, () => {
+  const r = maestro(["wait", "fixer", "t404"]);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /no live terminal t404/);
+  assert.deepEqual(r.acts, [], "an invalid target must not leave an hc wait running");
+});
+
+test("peers includes a parked label-only worker in its parent's space", { skip }, () => {
+  const r = maestro(["peers"]);
+  assert.equal(r.code, 0, r.err);
+  const parked = r.out.find((t) => t.address === "t4");
+  assert.equal(parked.parent, "t1");
+  assert.equal(parked.space, "Workspace");
+  assert.ok(!r.out.some((t) => t.address === "t9"));
 });
