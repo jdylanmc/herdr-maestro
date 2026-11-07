@@ -512,7 +512,11 @@ export default class Maestro extends View {
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
     for (const { sp, tree } of this.nestedSpaces()) {
-      if (sp.header) { rows.push(this.machineHeader(t, sp, roots, kidsOf, order, narrow)); continue; }
+      if (sp.header) {
+        this.nav.push({ key: sp.id });
+        rows.push(this.navRow(t, sp.id, this.machineHeader(t, sp, roots, kidsOf, order, narrow), { top: 8 }));
+        continue;
+      }
       const mine = roots.filter((x) => x.a.space === sp.id);
       this.nav.push({ key: `sp:${sp.id}`, space: sp });
       if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.navRow(t, `sp:${sp.id}`, this.railSpace(t, sp, mine))); continue; }
