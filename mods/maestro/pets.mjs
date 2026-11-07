@@ -22,7 +22,7 @@ const DELAY_CS = 14;
 const SCALE = 2; // 192x208 cells become 96x104 GIFs
 
 // ---- PNG decode (8-bit RGB/RGBA/gray/gray-alpha/palette, non-interlaced) ----
-function decodePng(buf) {
+export function decodePng(buf) {
   if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error("not a PNG");
   let p = 8, w = 0, h = 0, depth = 0, ct = 0, interlace = 0, pal = null, trns = null;
   const idat = [];

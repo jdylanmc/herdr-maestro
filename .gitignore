@@ -27,3 +27,7 @@ jsconfig.json
 .user/
 .skill-log/
 /*--*.md
+
+# Node tooling and test scratch space.
+node_modules/
+.test-tmp/
