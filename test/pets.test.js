@@ -46,6 +46,8 @@ test("renderPet turns a 9-row sheet into per-row GIFs and caches by sheet stamp"
   assert.deepEqual([idle.readUInt16LE(6), idle.readUInt16LE(8)], [96, 104]);
   assert.equal(gifFrames(idle), 6);
   const before = statSync(join(out, "tiny", "0.gif")).mtimeMs;
-  assert.deepEqual(renderPet(join(pet, "pet.json"), out), meta);
+  const { skipped, ...again } = renderPet(join(pet, "pet.json"), out);
+  assert.equal(skipped, true, "a cached render says it skipped");
+  assert.deepEqual(again, meta);
   assert.equal(statSync(join(out, "tiny", "0.gif")).mtimeMs, before, "unchanged sheet is not re-rendered");
 });
