@@ -8,7 +8,6 @@ import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 
-const MAX_TAIL = 8_000_000;
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -79,7 +78,7 @@ export default class Maestro extends View {
   init(_props, cx) {
     this.snaps = new Map();     // terminal address -> status-line payload
     this.fallback = new Map();  // terminal address -> session id (process ancestry)
-    this.logs = new Map();      // session id -> { s, offset, carry, path, busy }
+    this.logs = new Map();      // session id -> { s, offset, path, busy }
     this.collapsed = new Set(); // terminal addresses whose subagent tree is folded
     this.records = new Map();   // terminal address -> agent-written record (parent, tags, mood, name)
     this.view = props()?.view ?? "list"; // list (sidebar), footer (focused agent), board (window)
@@ -212,31 +211,24 @@ export default class Maestro extends View {
     await Promise.all([...ids].map((id) => this.tail(id)));
   }
 
-  // Reads what was appended since last time; the first read keeps only the last MAX_TAIL bytes.
+  // Folds what was appended since last time, as the helper's compact projection of the log.
   async tail(id) {
     let L = this.logs.get(id);
     if (!L) {
-      L = { s: emptySession(), offset: 0, carry: "", path: `${sessionRoot()}/${id}/events.jsonl`, busy: false };
+      L = { s: emptySession(), offset: 0, path: `${sessionRoot()}/${id}/events.jsonl`, busy: false };
       this.logs.set(id, L);
     }
     if (L.busy) return;
     L.busy = true;
     try {
-      const r = await helper("tail", L.path, L.offset, MAX_TAIL);
+      const r = await helper("events", L.path, L.offset);
       if (r.code !== 0) return;
-      const nl1 = r.stdout.indexOf("\n");
-      const nl2 = r.stdout.indexOf("\n", nl1 + 1);
-      const size = Number(r.stdout.slice(0, nl1));
-      if (!Number.isFinite(size) || size === L.offset) return;
-      const mode = r.stdout.slice(nl1 + 1, nl2);
-      let chunk = r.stdout.slice(nl2 + 1);
-      if (size < L.offset) { L.s = emptySession(); L.carry = ""; }
-      if (mode === "cut") { chunk = chunk.slice(chunk.indexOf("\n") + 1); L.carry = ""; }
-      const text = L.carry + chunk;
-      const end = text.lastIndexOf("\n");
-      applyLines(L.s, end >= 0 ? text.slice(0, end) : "");
-      L.carry = end >= 0 ? text.slice(end + 1) : text;
-      L.offset = size;
+      const nl = r.stdout.indexOf("\n");
+      const next = Number(nl < 0 ? r.stdout : r.stdout.slice(0, nl));
+      if (!Number.isFinite(next) || next === L.offset) return;
+      if (next < L.offset) L.s = emptySession();
+      applyLines(L.s, nl < 0 ? "" : r.stdout.slice(nl + 1));
+      L.offset = next;
     } catch {
     } finally {
       L.busy = false;

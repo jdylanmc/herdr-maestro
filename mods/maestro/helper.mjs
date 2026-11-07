@@ -3,6 +3,7 @@
 // files and run programs. Runs on any machine with Node, which Copilot CLI requires.
 //
 //   helper.mjs tail <file> <offset> <max>   -> "<size>\n<cut|whole>\n<bytes from offset>"
+//   helper.mjs events <file> <offset>      -> "<next offset>\n" + compact JSON lines Maestro reads
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
 //   helper.mjs run <argv...>                 -> runs argv without inherited CMUX_* variables
@@ -31,6 +32,67 @@ function tail(file, offset, max) {
     }
     process.stdout.write(`${size}\n${cut ? "cut" : "whole"}\n`);
     process.stdout.write(buf.subarray(0, got));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Maestro's view of a session log: only the event types it folds, without prompts, tool
+// arguments or results, so a log of any size answers within exec's 8 MiB output limit.
+const EVENT = /"type":"(subagent\.(started|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed|usage_record)|model\.model_call_success|user\.message|assistant\.turn_(start|end)|abort)"/;
+const field = (line, k) => line.match(new RegExp(`"${k}":"([^"]*)"`))?.[1];
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undefined).map((k) => [k, o[k]]));
+export function project(line) {
+  const type = line.match(EVENT)?.[1];
+  if (!type) return null;
+  const agentId = /"agentId":"/.test(line) ? field(line, "agentId") ?? true : undefined;
+  if (type === "session.usage_record" || type === "model.model_call_success") {
+    // Huge lines: read three fields without parsing.
+    return JSON.stringify({ type, ...(agentId ? { agentId } : {}), model: field(line, "model"), modelDisplayName: field(line, "modelDisplayName"), reasoningEffort: field(line, "reasoningEffort") });
+  }
+  let e;
+  try { e = JSON.parse(line); } catch { return null; }
+  const d = e.data ?? {};
+  const data = type.startsWith("tool.execution") ? pick(d, ["toolName", "toolCallId", "model"])
+    : type === "user.message" ? pick(d, ["source"])
+    : type.startsWith("assistant.turn") ? pick(d, ["parentToolCallId"])
+    : type === "subagent.started" ? pick(d, ["agentDisplayName", "agentName", "parentId", "model"])
+    : type === "session.schedule_created" ? pick(d, ["id", "displayPrompt", "intervalMs", "cron", "at", "recurring", "selfPaced"])
+    : type === "session.start" ? pick(d, ["startTime"])
+    : type === "session.model_change" ? pick(d, ["newModel", "reasoningEffort"])
+    : type === "session.error" ? pick(d, ["errorType"])
+    : type.startsWith("subagent.") ? pick(d, ["cancelled"])
+    : pick(d, ["id", "requestId", "nextRunAt"]);
+  return JSON.stringify({ type, timestamp: e.timestamp, ...(e.agentId ? { agentId: e.agentId } : {}), data });
+}
+
+function events(file, offset) {
+  const fd = openSync(file, "r");
+  try {
+    const size = fstatSync(fd).size;
+    let pos = Number(offset) || 0;
+    if (pos > size) pos = 0;
+    const out = [];
+    let bytes = 0, carry = "";
+    const buf = Buffer.alloc(4 << 20);
+    while (pos < size) {
+      const n = readSync(fd, buf, 0, Math.min(buf.length, size - pos), pos);
+      if (n <= 0) break;
+      const text = carry + buf.toString("utf8", 0, n);
+      const end = text.lastIndexOf("\n");
+      const whole = end >= 0 ? text.slice(0, end) : "";
+      carry = end >= 0 ? text.slice(end + 1) : text;
+      pos += n;
+      for (const line of whole.split("\n")) {
+        const p = line && project(line);
+        if (!p) continue;
+        out.push(p);
+        bytes += p.length + 1;
+        while (bytes > 6_000_000) bytes -= out.shift().length + 1;
+      }
+    }
+    // Stop before a partial last line; it is read whole next time.
+    process.stdout.write(`${pos - Buffer.byteLength(carry)}\n${out.join("\n")}`);
   } finally {
     closeSync(fd);
   }
@@ -71,9 +133,11 @@ function runClean(argv) {
   child.on("error", (e) => { process.stderr.write(`${argv[0]}: ${e.message}\n`); process.exit(127); });
 }
 
-if (cmd === "run") runClean(args);
+const main = process.argv[1] && import.meta.url.endsWith(process.argv[1].split(/[\\/]/).pop());
+if (!main) {} else if (cmd === "run") runClean(args);
 else try {
   if (cmd === "tail") tail(args[0], args[1], args[2]);
+  else if (cmd === "events") events(args[0], args[1]);
   else if (cmd === "locks") locks(args[0]);
   else if (cmd === "procs") procs();
   else if (cmd === "pets") { const { renderAll } = await import("./pets.mjs"); process.stdout.write(JSON.stringify(renderAll(args[0], args.slice(1)))); }

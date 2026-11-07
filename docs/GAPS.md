@@ -11,7 +11,7 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Wanted:** tail a session's `events.jsonl` from the mod.
 **Blocked by:** `fs/promises` exposes only `readFile, readdir, exists, mkdir, writeFile, unlink, rmdir` (no `open`, `stat`, ranged read). `readTextFile` rejects files over 1 MiB; `hc file read` rejects files over 64 MB.
 **Evidence:** 593 of 899 logs exceed 1 MiB; 49 exceed 64 MB; the largest is 1,032 MB.
-**Shipped:** `mods/maestro/helper.mjs`, run with `exec("node", …)`, reads from a byte offset (8 MB of a 100 MB log in ~34 ms).
+**Shipped:** `mods/maestro/helper.mjs events`, run with `exec("node", …)`, scans from a byte offset and returns only a compact projection of the events Maestro folds (a 107 MB log: 0.25 s, 327 KB). An earlier raw 8 MB tail failed silently on busy sessions: `exec` caps output at 8 MiB, so the first read never completed and subagents never appeared.
 **Closes with:** `fs.stat` and a ranged read in the mod runtime, or an `hc file read --bytes`.
 
 ### G-02 - No process-tree API
