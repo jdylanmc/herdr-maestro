@@ -120,6 +120,7 @@ export default class Maestro extends View {
     this.screens = new Map();   // terminal address -> { lines, prompt, at, busy }; memory only, never written
     this.machineList = [];      // `hc machine ls` (temporary ones skipped)
     this.remote = new Map();    // machine -> { v: probe answer or null, at, busy }
+    this.remoteBusy = new Set(); // machines with a snapshot/binding/tail pass in flight
     cx.spawn(async (cx) => { await this.loadPets(); cx.notify(); });
     cx.spawn(async (cx) => {
       for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
@@ -155,7 +156,11 @@ export default class Maestro extends View {
     if (this.primary) { this.alertMem = new Map(); cx.timer.every(1000, () => this.alertTick()); }
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
     cx.spawn(async (cx) => { await this.refreshMachines(); cx.notify(); });
-    cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.refreshMachines(); await this.loadRemoteSnaps(); cx.notify(); }));
+    cx.spawn(async (cx) => { await this.refreshRemote(cx); });
+    cx.timer.every(15000, (cx) => {
+      cx.spawn(async (cx) => { await this.refreshMachines(); cx.notify(); });
+      cx.spawn(async (cx) => { await this.refreshRemote(cx); });
+    });
   }
 
   // Codex pets (~/.codex/pets), cmux Maestro's own and added ones (data/maestro/pet-sources),
@@ -268,7 +273,6 @@ export default class Maestro extends View {
 
   // Fallback binding: inuse.<pid>.lock owners walked up to each terminal's foreground pid.
   async bindByAncestry() {
-    await this.bindRemote();
     const unbound = this.live().filter((a) => !a.address.includes("/") && !this.snaps.get(a.address)?.session_id && !this.fallback.has(a.address));
     if (!unbound.length) return;
     let locks, pairs;
@@ -331,10 +335,10 @@ export default class Maestro extends View {
   }
 
   // Remote status-line snapshots, when the bridge runs there too (keyed by its local address).
-  async loadRemoteSnaps() {
-    const live = this.live().filter((a) => machineOf(a.address));
+  async loadRemoteSnaps(machine) {
+    const live = this.live().filter((a) => this.machineFor(a) === machine);
     const keep = new Set(live.map((a) => a.address));
-    for (const k of [...this.snaps.keys()]) if (machineOf(k) && !keep.has(k)) this.snaps.delete(k);
+    for (const k of [...this.snaps.keys()]) if (machineOf(k) === machine && !keep.has(k)) this.snaps.delete(k);
     await Promise.all(live.map(async (a) => {
       const on = machineOf(a.address);
       const info = this.remoteInfo(on);
@@ -346,12 +350,31 @@ export default class Maestro extends View {
     }));
   }
 
+  async refreshRemote(cx) {
+    const live = this.live();
+    const keep = new Set(live.map((a) => a.address));
+    for (const k of [...this.snaps.keys()]) if (machineOf(k) && !keep.has(k)) this.snaps.delete(k);
+    const names = [...new Set(live.map((a) => this.machineFor(a)).filter(Boolean))];
+    await Promise.all(names.map(async (on) => {
+      if (this.remoteBusy.has(on)) return;
+      this.remoteBusy.add(on);
+      try {
+        await this.loadRemoteSnaps(on);
+        await this.bindRemote(on);
+        await this.tailAll(on);
+      } finally {
+        this.remoteBusy.delete(on);
+        cx.notify();
+      }
+    }));
+  }
+
   // Ancestry binding on other machines: their helper's locks and processes, hc's machine/tN foreground pid.
-  async bindRemote() {
+  async bindRemote(machine) {
     const by = new Map();
     for (const a of this.live()) {
-      const on = machineOf(a.address);
-      if (!on || this.snaps.get(a.address)?.session_id || this.fallback.has(a.address)) continue;
+      const on = this.machineFor(a);
+      if (on !== machine || this.snaps.get(a.address)?.session_id || this.fallback.has(a.address)) continue;
       if (!by.has(on)) by.set(on, []);
       by.get(on).push(a);
     }
@@ -383,14 +406,19 @@ export default class Maestro extends View {
     return this.snaps.get(addr)?.session_id ?? this.fallback.get(addr) ?? null;
   }
 
-  async tailAll() {
+  async tailAll(machine = null) {
     // Other views (the pet pokedex) key sessions the same way: session id, else terminal.
     if (this.primary) {
       const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address) ?? a.address]));
       if (JSON.stringify(keys) !== JSON.stringify(shared("maestro.sessionKeys") ?? {})) setShared("maestro.sessionKeys", keys);
     }
     const ids = new Map();
-    for (const a of this.live()) { const id = this.sessionFor(a.address); if (id) ids.set(id, this.machineFor(a)); }
+    for (const a of this.live()) {
+      const on = this.machineFor(a);
+      if (on !== machine) continue;
+      const id = this.sessionFor(a.address);
+      if (id) ids.set(id, on);
+    }
     await Promise.all([...ids].map(([id, on]) => this.tail(id, on)));
   }
 
