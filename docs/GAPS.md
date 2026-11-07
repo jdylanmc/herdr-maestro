@@ -109,7 +109,7 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** the Maestro mod and its launch menu cache `knownAgents()` (key, name, run, installed) in `shared("maestro.knownAgents")`; the CLI reads it from `shared.json`, else a fallback table (`copilot`, `claude`, `codex`, `cursor-agent`, `gemini`, `opencode`, `pi`, `amp`) and errors with the known names.
 **Closes with:** `herdr-app agents --json` (or `knownAgents` over `herdr-app do`).
 
-### G-14 - Long app-home paths exceed the macOS socket limit
+### G-15 - Long app-home paths exceed the macOS socket limit
 
 **Wanted:** validate a mod in an isolated Herdr window under a session artifact directory.
 **Evidence:** a 105-byte `<app-home>/herdr-app.sock` path made `herdr-app status`, `do` and `shot` fail with "path must be shorter than SUN_LEN".
