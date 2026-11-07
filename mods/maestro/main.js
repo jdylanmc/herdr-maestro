@@ -887,14 +887,16 @@ export default class Maestro extends View {
       .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
     return h_flex().flex_none().gap(1)
-      .child(btn("wtn", "New Copilot in this worktree", () => run("tab.new", { ...(space ? { space } : {}), ...(folder ? { folder } : {}), argv: copilotArgv() }),
+      .child(btn("wtn", "New Copilot in this worktree", () => run("tab.new", { ...(space ? { space } : {}), ...(folder ? { folder } : {}), argv: this.argvFor(spaces().find((sp) => sp.id === space)?.machine) }),
         svg("mods/workspace-chrome/plus.svg").size(12)))
       .child(btn("wta", "Start another agent in this worktree…", () => this.openLaunch(space, folder),
         svg("mods/workspace-chrome/chevron-down.svg").size(10)));
   }
 
   openLaunch(space, folder) {
-    openOverlay({ mod: "maestro-launch", kind: "popup", at: "pointer", width: 240, height: 300, props: { space, folder } });
+    const machine = spaces().find((sp) => sp.id === space)?.machine;
+    const helper = machine ? this.remoteInfo(machine)?.helper ?? null : null;
+    openOverlay({ mod: "maestro-launch", kind: "popup", at: "pointer", width: 240, height: 300, props: { space, folder, helper } });
   }
 
   // A folded space or worktree: its agents' icons and state cues in one row, each focusing its agent.

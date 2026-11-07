@@ -1,6 +1,6 @@
 // Maestro's agent launcher: a popup listing the coding agents Herdr knows (knownAgents()),
 // opened from a space's or worktree's chevron. Picking one starts it in that space and folder
-// through Maestro's helper (helper.mjs run), Copilot with Maestro's own argv.
+// through that machine's Maestro helper when available, Copilot with Maestro's own argv.
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -33,7 +33,8 @@ export default class MaestroLaunch extends View {
   start(a) {
     closeOverlay(props().overlay);
     const argv = a.key === "copilot" ? copilotArgv() : a.run;
-    run("tab.new", { ...(this.space ? { space: this.space } : {}), ...(this.folder ? { folder: this.folder } : {}), argv: ["node", `${appHome()}/mods/maestro/helper.mjs`, "run", ...argv] });
+    const helper = this.local ? `${appHome()}/mods/maestro/helper.mjs` : props().helper;
+    run("tab.new", { ...(this.space ? { space: this.space } : {}), ...(this.folder ? { folder: this.folder } : {}), argv: helper ? ["node", helper, "run", ...argv] : [...argv] });
   }
 
   render() {
