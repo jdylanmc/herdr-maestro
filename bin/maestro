@@ -33,7 +33,12 @@ const PET_SOURCES = join(DATA, "pet-sources");
 const petIndex = () => { try { return JSON.parse(readFileSync(join(PETS, "index.json"), "utf8")); } catch { return []; } };
 const choices = () => pets.parseChoices(existsSync(CHOICES) ? readFileSync(CHOICES, "utf8") : null);
 // Pets are kept per Copilot session (survives restarts and resumes), else per terminal.
-const petKey = (me) => { try { return JSON.parse(readFileSync(join(DATA, "terminals", `${me}.json`), "utf8")).session_id || me; } catch { return me; } };
+const petKey = (me) => {
+  const terminal = json("hc", ["get", me, "--json"]);
+  const key = terminal.status?.app ?? terminal.report?.app ?? terminal.agent ?? terminal.program?.key;
+  if (!agentlib.isCopilot({ key })) return me;
+  try { return JSON.parse(readFileSync(join(DATA, "terminals", `${me}.json`), "utf8")).session_id || me; } catch { return me; }
+};
 const renderPets = (force) => JSON.parse(run("node", [HELPER, "pets", ...(force ? ["--force"] : []), PETS, ...pets.petRoots(homedir(), DATA)]));
 function usablePet(id) {
   const p = petIndex().find((x) => x.id === id);
