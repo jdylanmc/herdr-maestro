@@ -43,12 +43,12 @@ const inside = (p, dir) => {
 
 // Why a worktree must stay: its worker or any live terminal still in it (always),
 // or uncommitted changes (unless forced). null: it may go.
-export function removalBlocker({ path, entry = {}, live = [], dirty = false, force = false }) {
+export function removalBlocker({ path, displayPath = path, entry = {}, live = [], dirty = false, force = false }) {
   const addrs = new Set(live.map((t) => t.address));
   if (entry.terminal && addrs.has(entry.terminal)) return `its worker ${entry.terminal} is still running`;
   const there = live.find((t) => inside(t.cwd, path));
   if (there) return `live terminal ${there.address} is in it`;
-  if (dirty && !force) return `${path} has uncommitted changes (use --force)`;
+  if (dirty && !force) return `${displayPath} has uncommitted changes (use --force)`;
   return null;
 }
 

@@ -244,7 +244,13 @@ const commands = {
     const [path, w] = entry;
     const force = flags.includes("--force");
     const there = existsSync(path);
-    const blocker = wt.removalBlocker({ path, entry: w, live: liveTerms(), dirty: there && Boolean(git(path, ["status", "--porcelain"])), force });
+    const real = (p) => {
+      try { return realpathSync(p); }
+      catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return p; throw e; }
+    };
+    const blocker = wt.removalBlocker({ path: real(path), displayPath: path, entry: w,
+      live: liveTerms().map((t) => ({ ...t, cwd: t.cwd && real(t.cwd) })),
+      dirty: there && Boolean(git(path, ["status", "--porcelain"])), force });
     if (blocker) fail(`denied: ${blocker}`, 3);
     if (wt.kindOf(w) === "herdr" && w.space) {
       // Its space usually went with its last tab; close it only when no terminal is left in it.

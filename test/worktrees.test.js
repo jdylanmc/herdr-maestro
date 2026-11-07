@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { herdrSlug, herdrPath, siblingPath, repoOf, chooseKind, kindOf, removalBlocker, spacePlace, nestSpaces } from "../mods/maestro/wtlib.js";
 
@@ -44,6 +46,44 @@ test("removal refuses a live worker, any live terminal inside, or dirty without 
   assert.match(removalBlocker({ path, dirty: true }), /uncommitted/);
   assert.equal(removalBlocker({ path, dirty: true, force: true }), null);
   assert.equal(removalBlocker({ path, entry: { terminal: "t3" }, live: [] }), null);
+});
+
+test("CLI removal canonicalizes symlinks without changing stored paths or bypassing live terminals", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "maestro-worktree-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const physical = join(root, "physical");
+  const path = join(root, "linked");
+  mkdirSync(join(physical, "src"), { recursive: true });
+  symlinkSync(physical, path, process.platform === "win32" ? "junction" : "dir");
+  const source = readFileSync(new URL("../bin/maestro", import.meta.url), "utf8");
+  const method = source.slice(source.indexOf("  worktree("), source.indexOf("  // This agent's icon"));
+  let live = [];
+  let dirty = "";
+  let removed;
+  let saved;
+  const cli = runInNewContext(`({${method}})`, {
+    existsSync, realpathSync, wt: { removalBlocker, kindOf },
+    worktrees: () => ({ [path]: { repo: root, branch: "feat", kind: "sibling" } }),
+    json: () => ({ terminals: live }),
+    git: (cwd, args) => args[0] === "status" ? dirty : (removed = args.at(-1)),
+    fail: (message) => { throw new Error(message); },
+    writeJson: (_path, value) => { saved = value; },
+    WORKTREES: "unused", out: () => {},
+  });
+  for (const cwd of [realpathSync(join(physical, "src")), join(path, "src")]) {
+    live = [{ address: "other", cwd }];
+    for (const flags of [[], ["--force"]]) {
+      assert.throws(() => cli.worktree(["rm", path, ...flags]), /live terminal other/);
+      assert.equal(removed, undefined);
+      assert.equal(saved, undefined);
+    }
+  }
+  live = [];
+  dirty = "?? file";
+  assert.throws(() => cli.worktree(["rm", path]), (e) => e.message.includes(`${path} has uncommitted changes`));
+  cli.worktree(["rm", path, "--force"]);
+  assert.equal(removed, path);
+  assert.deepEqual(Object.keys(saved), []);
 });
 
 function menuFor(sessions, space, dirty = false) {
