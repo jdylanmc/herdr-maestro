@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { pinFirst, alertStep } from "../mods/maestro/alerts.js";
 
 const on = { sounds: true, settle: true, debounceMs: 1000 };
-const w = (status, extra = {}) => ({ address: "t2", tab: "tab2", status, needs: status === "blocked", herdrChimes: false, worker: true, tabSettled: false, ...extra });
+const w = (status, extra = {}) => ({ address: "t2", tab: "tab2", status, needs: status === "blocked", herdrChimes: false, worker: true, tabSettled: false, tabPanes: 1, ...extra });
 
 test("pinned agents sort first and the rest keep their order", () => {
   const list = [{ n: 1 }, { n: 2, pinned: true }, { n: 3 }, { n: 4, pinned: true }];
@@ -63,6 +63,37 @@ test("brings a failed worker's tab back only if Maestro settled it", () => {
     assert.deepEqual(alertStep(mem, [w("idle", { failed: true, tabSettled: true })], 3000, on),
       ours ? [{ type: "unsettle", tab: "tab2", address: "t2" }] : []);
   }
+});
+
+test("never settles a finished worker's tab with a working, blocked or failed sibling", () => {
+  for (const status of ["working", "blocked", "idle"]) {
+    const mem = new Map();
+    const sibling = w(status, { address: "t3", worker: false, tabPanes: 2, failed: status === "idle" });
+    const opts = { ...on, sounds: false };
+    alertStep(mem, [w("working", { tabPanes: 2 }), sibling], 0, opts);
+    alertStep(mem, [w("done", { tabPanes: 2 }), sibling], 1, opts);
+    assert.deepEqual(alertStep(mem, [w("done", { tabPanes: 2 }), sibling], 5000, opts), []);
+  }
+});
+
+test("cancels settling when a tab is split during debounce or its pane count is unknown", () => {
+  for (const tabPanes of [2, undefined]) {
+    const mem = new Map();
+    alertStep(mem, [w("working")], 0, on);
+    alertStep(mem, [w("done")], 1, on);
+    assert.deepEqual(alertStep(mem, [w("done", { tabPanes })], 1001, on), []);
+    assert.deepEqual(alertStep(mem, [w("done", { tabPanes })], 5000, on), []);
+  }
+});
+
+test("brings a Maestro-settled tab back when another pane is added", () => {
+  const mem = new Map();
+  alertStep(mem, [w("working")], 0, on);
+  alertStep(mem, [w("done")], 1, on);
+  alertStep(mem, [w("done")], 1001, on);
+  alertStep(mem, [w("idle", { tabSettled: true, tabPanes: 2 })], 2000, on);
+  assert.deepEqual(alertStep(mem, [w("idle", { tabSettled: true, tabPanes: 2 })], 3000, on),
+    [{ type: "unsettle", tab: "tab2", address: "t2" }]);
 });
 
 test("leaves non-workers and tabs someone else showed again alone", () => {

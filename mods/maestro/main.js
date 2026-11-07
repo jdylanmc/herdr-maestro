@@ -482,6 +482,7 @@ export default class Maestro extends View {
       herdrChimes: herdrSounds && Boolean(x.a.pane) && x.a.status === "blocked",
       worker: Boolean(x.rec.launcher ?? labels.get(x.a.address)?.["maestro.parent"]),
       tabSettled: Boolean(tabs.get(x.a.tab)?.settled),
+      tabPanes: tabs.get(x.a.tab)?.panes,
     }));
     for (const act of alertStep(this.alertMem, items, Date.now(), { sounds, settle, debounceMs: 2500 })) {
       try {
