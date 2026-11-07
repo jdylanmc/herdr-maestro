@@ -70,6 +70,9 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   The archive button settles the tab of a Maestro-launched worker once it finishes after working
   (`tab.next`/`tab.prev` skip it) and brings it back when it works again; Herdr itself brings a settled tab
   back when its agent needs you.
+- **Other machines** (`hc machine ls`): once one is known, spaces group under machine headers like
+  Herdr's Spaces sidebar (This computer first, then by name; connection dot, `+` new space there,
+  fold remembered). Nothing changes while only this computer exists.
 
 **Pets** are Codex-format sprite sheets (8 columns of 192×208 cells; 9-row sheets or 20-row mood
 atlases) from [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`), cmux Maestro's own pet,
@@ -151,6 +154,9 @@ each one's kind; `rm` refuses while its worker or any live terminal is in it, or
 - `mods/maestro/helper.mjs` tails each bound session's `events.jsonl` by byte offset for
   subagents, attention causes, model/effort and schedules.
 - Lineage and names are herdr-core labels (`maestro.parent`, `maestro.name`).
+- Agents on another machine: Maestro probes it with Node (`exec(..., { on })`); where Maestro is
+  installed there too, binding, log tails, git and status-line snapshots run on that machine.
+  Otherwise those agents show Herdr's status and title only (see `docs/GAPS.md` G-17).
 - Sessions Maestro launches start through `helper.mjs run`, which drops `CMUX_*` variables a
   cmux-launched herdr-core would otherwise pass on.
 

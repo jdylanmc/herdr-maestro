@@ -4,7 +4,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings } from "herdr";
+import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
@@ -12,6 +12,7 @@ import { liveAgents } from "./live.js";
 import { pinFirst, alertStep, NEEDS_YOU } from "./alerts.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 import { nestSpaces, spacePlace } from "./wtlib.js";
+import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
@@ -114,9 +115,13 @@ export default class Maestro extends View {
     if (this.view === "themes") { this.handle.focus(); cx.timer.after(400, () => this.handle.focus()); return; }
     this.folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
+    this.gitBusy = new Set();   // machines with a git refresh in flight (null is local)
     this.pets = [];             // rendered pets (data/maestro/pets/index.json)
     this.choices = null;        // data/maestro/pets/choices.json, once read
     this.screens = new Map();   // terminal address -> { lines, prompt, at, busy }; memory only, never written
+    this.machineList = [];      // `hc machine ls` (temporary ones skipped)
+    this.remote = new Map();    // machine -> { v: probe answer or null, at, busy }
+    this.remoteBusy = new Set(); // machines with a snapshot/binding/tail pass in flight
     cx.spawn(async (cx) => { await this.loadPets(); cx.notify(); });
     cx.spawn(async (cx) => {
       for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
@@ -151,6 +156,12 @@ export default class Maestro extends View {
     cx.timer.every(3000, (cx) => cx.spawn(async (cx) => { await this.tailAll(); cx.notify(); }));
     if (this.primary) { this.alertMem = new Map(); cx.timer.every(1000, () => this.alertTick()); }
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
+    cx.spawn(async (cx) => { await this.refreshMachines(); cx.notify(); });
+    cx.spawn(async (cx) => { await this.refreshRemote(cx); });
+    cx.timer.every(15000, (cx) => {
+      cx.spawn(async (cx) => { await this.refreshMachines(); cx.notify(); });
+      cx.spawn(async (cx) => { await this.refreshRemote(cx); });
+    });
   }
 
   // Codex pets (~/.codex/pets), cmux Maestro's own and added ones (data/maestro/pet-sources),
@@ -285,31 +296,149 @@ export default class Maestro extends View {
     }
   }
 
+  // ---- Other machines (`hc machine ls`): spaces there, their sessions through `on` ----
+  async refreshMachines() {
+    try {
+      const r = await hc(["machine", "ls", "--json"]);
+      if (r.code === 0) this.machineList = (JSON.parse(r.stdout).machines ?? []).filter((m) => m && !m.temporary);
+    } catch {}
+  }
+
+  machineFor(a) { return machineOf(a.address) ?? spaces().find((sp) => sp.id === a.space)?.machine ?? null; }
+
+  // What a machine has (home, Herdr home, Maestro's helper), probed with Node there: again
+  // after 5 min, or 1 min when it couldn't answer. Null until known or without Node.
+  remoteInfo(on) {
+    let R = this.remote.get(on);
+    if (!R) { R = { v: null, at: 0, busy: false }; this.remote.set(on, R); }
+    if (!R.busy && Date.now() - R.at > (R.v ? 300_000 : 60_000)) {
+      R.busy = true;
+      this.cx?.spawn(async (cx) => {
+        try { const r = await exec("node", ["-e", PROBE], { on }); R.v = r.code === 0 ? parseProbe(r.stdout) : null; } catch { R.v = null; }
+        R.at = Date.now();
+        R.busy = false;
+        cx.notify();
+      });
+    }
+    return R.v;
+  }
+
+  helperOn(on, ...args) {
+    const p = this.remoteInfo(on)?.helper;
+    if (!p) return Promise.reject(new Error(`no Maestro helper on ${on}`));
+    return exec("node", [p, ...args.map(String)], { on });
+  }
+
+  // New Copilot argv for a space: a remote one runs through that machine's helper, if any.
+  argvFor(machine) {
+    if (!machine) return copilotArgv();
+    return remoteArgv(shared("maestro.argv") ?? ["copilot", "--yolo"], this.remoteInfo(machine)?.helper);
+  }
+
+  // Remote status-line snapshots, when the bridge runs there too (keyed by its local address).
+  async loadRemoteSnaps(machine) {
+    const live = this.live().filter((a) => machineOf(a.address) === machine);
+    const keep = new Set(live.map((a) => a.address));
+    for (const k of [...this.snaps.keys()]) if (machineOf(k) === machine && !keep.has(k)) this.snaps.delete(k);
+    await Promise.all(live.map(async (a) => {
+      const on = machineOf(a.address);
+      const info = this.remoteInfo(on);
+      if (!info) return;
+      try {
+        const text = await readTextFile(`${info.app}/data/maestro/terminals/${localAddress(a.address)}.json`, { on });
+        if (text) this.snaps.set(a.address, JSON.parse(text));
+      } catch {}
+    }));
+  }
+
+  async refreshRemote(cx) {
+    const live = this.live();
+    const keep = new Set(live.map((a) => a.address));
+    for (const k of [...this.snaps.keys()]) if (machineOf(k) && !keep.has(k)) this.snaps.delete(k);
+    const names = [...new Set(live.map((a) => this.machineFor(a)).filter(Boolean))];
+    await Promise.all(names.map(async (on) => {
+      if (this.remoteBusy.has(on)) return;
+      this.remoteBusy.add(on);
+      try {
+        await this.loadRemoteSnaps(on);
+        await this.bindRemote(on);
+        await this.tailAll(on);
+      } finally {
+        this.remoteBusy.delete(on);
+        cx.notify();
+      }
+    }));
+  }
+
+  // Ancestry binding on other machines: their helper's locks and processes, hc's machine/tN foreground pid.
+  async bindRemote(machine) {
+    const by = new Map();
+    for (const a of this.live()) {
+      const on = machineOf(a.address);
+      if (!on || on !== machine || this.snaps.get(a.address)?.session_id || this.fallback.has(a.address)) continue;
+      if (!by.has(on)) by.set(on, []);
+      by.get(on).push(a);
+    }
+    for (const [on, unbound] of by) {
+      const info = this.remoteInfo(on);
+      if (!info?.helper) continue;
+      let locks, pairs;
+      try {
+        locks = JSON.parse((await this.helperOn(on, "locks", `${info.home}/.copilot/session-state`)).stdout);
+        pairs = JSON.parse((await this.helperOn(on, "procs")).stdout);
+      } catch { continue; }
+      const parent = new Map(pairs);
+      const owner = new Map();
+      for (const l of locks) if (parent.has(l.pid)) owner.set(l.pid, l.id);
+      for (const a of unbound) {
+        let fg;
+        try { fg = JSON.parse((await hc(["get", a.address, "--json"])).stdout)?.foreground?.pid; } catch { continue; }
+        if (!fg) continue;
+        for (const [pid, sid] of owner) {
+          let p = pid;
+          for (let hop = 0; hop < 6 && p && p !== fg; hop++) p = parent.get(p);
+          if (p === fg) { this.fallback.set(a.address, sid); break; }
+        }
+      }
+    }
+  }
+
   sessionFor(addr) {
     return this.snaps.get(addr)?.session_id ?? this.fallback.get(addr) ?? null;
   }
 
-  async tailAll() {
+  async tailAll(machine = null) {
     // Other views (the pet pokedex) key sessions the same way: session id, else terminal.
     if (this.primary) {
       const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address) ?? a.address]));
       if (JSON.stringify(keys) !== JSON.stringify(shared("maestro.sessionKeys") ?? {})) setShared("maestro.sessionKeys", keys);
     }
-    const ids = new Set(this.live().map((a) => this.sessionFor(a.address)).filter(Boolean));
-    await Promise.all([...ids].map((id) => this.tail(id)));
+    const ids = new Map();
+    for (const a of this.live()) {
+      const on = this.machineFor(a);
+      if (on !== machine) continue;
+      const id = this.sessionFor(a.address);
+      if (id) ids.set(id, on);
+    }
+    await Promise.all([...ids].map(([id, on]) => this.tail(id, on)));
   }
 
   // Folds what was appended since last time, as the helper's compact projection of the log.
-  async tail(id) {
+  async tail(id, on = null) {
     let L = this.logs.get(id);
+    const info = on ? this.remoteInfo(on) : null;
+    // Another machine: its helper reads the log there; without one, Herdr's status only.
+    if (on && !info?.helper) return;
     if (!L) {
-      L = { s: emptySession(), offset: 0, path: `${sessionRoot()}/${id}/events.jsonl`, busy: false };
+      L = { s: emptySession(), offset: 0, path: `${on ? `${info.home}/.copilot/session-state` : sessionRoot()}/${id}/events.jsonl`, busy: false, on };
       this.logs.set(id, L);
     }
     if (L.busy) return;
+    if (on && Date.now() - (L.at ?? 0) < 9000) return;
     L.busy = true;
+    L.at = Date.now();
     try {
-      const r = await helper("events", L.path, L.offset);
+      const r = on ? await this.helperOn(on, "events", L.path, L.offset) : await helper("events", L.path, L.offset);
       if (r.code !== 0) return;
       const nl = r.stdout.indexOf("\n");
       const next = Number(nl < 0 ? r.stdout : r.stdout.slice(0, nl));
@@ -331,6 +460,7 @@ export default class Maestro extends View {
   sessions() {
     const byPane = new Map(panes().map((p) => [p.pane, p]));
     const kinds = new Map(terminals().map((k) => [k.address, k.report?.kind ?? null]));
+    const spMachine = new Map(spaces().map((sp) => [sp.id, sp.machine ?? null]));
     return this.live().map((a) => {
       const pane = byPane.get(a.pane);
       const snap = this.snaps.get(a.address);
@@ -342,7 +472,8 @@ export default class Maestro extends View {
       const rec = this.records.get(a.address) ?? {};
       const failed = a.status !== "working" && a.status !== "blocked" && s?.error ? true : false;
       const tagKey = id ?? a.address;
-      return { a, pane, snap, id, s, key, cwd, rec, failed, tagKey, userTags: (shared("maestro.tags") ?? {})[tagKey] ?? [], branch: pane?.branch ?? null, kind: a.status === "blocked" ? kinds.get(a.address) ?? null : null };
+      const machine = machineOf(a.address) ?? spMachine.get(a.space) ?? null;
+      return { a, pane, snap, id, s, key, cwd, rec, failed, tagKey, machine, userTags: (shared("maestro.tags") ?? {})[tagKey] ?? [], branch: pane?.branch ?? null, kind: a.status === "blocked" ? kinds.get(a.address) ?? null : null };
     });
   }
 
@@ -355,7 +486,7 @@ export default class Maestro extends View {
     if (this.view !== "footer") this.watchBlocked(list);
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
-    this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()) }))]);
+    this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()), machine: sp.machine ?? null }))]);
     this.keyboardState();
     this.nav = [];
     const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
@@ -365,7 +496,7 @@ export default class Maestro extends View {
     const shown = list.filter((x) => !(hide[x.a.space] && x.a.parent && x.a.parent !== x.a.address && every.has(x.a.parent)
       && (x.a.status === "idle" || x.a.status === "done") && !x.failed));
     const byAddr = new Map(shown.map((x) => [x.a.address, x]));
-    const wt = (x) => this.gitOf(x.cwd)?.top ?? x.cwd ?? "?";
+    const wt = (x) => this.gitOf(x.cwd, x.machine)?.top ?? x.cwd ?? "?";
     const kidsOf = new Map();
     const nested = new Set();
     for (const x of shown) {
@@ -381,6 +512,11 @@ export default class Maestro extends View {
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
     for (const { sp, tree } of this.nestedSpaces()) {
+      if (sp.header) {
+        this.nav.push({ key: sp.id });
+        rows.push(this.navRow(t, sp.id, this.machineHeader(t, sp, roots, kidsOf, order, narrow), { top: 8 }));
+        continue;
+      }
       const mine = roots.filter((x) => x.a.space === sp.id);
       this.nav.push({ key: `sp:${sp.id}`, space: sp });
       if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.navRow(t, `sp:${sp.id}`, this.railSpace(t, sp, mine))); continue; }
@@ -399,7 +535,7 @@ export default class Maestro extends View {
       const trees = new Map();
       for (const x of mine) {
         const k = wt(x);
-        if (!trees.has(k)) trees.set(k, { g: this.gitOf(x.cwd), cwd: x.cwd, items: [] });
+        if (!trees.has(k)) trees.set(k, { g: this.gitOf(x.cwd, x.machine), cwd: x.cwd, items: [] });
         trees.get(k).items.push(x);
       }
       for (const [k, tr] of trees) {
@@ -538,34 +674,58 @@ export default class Maestro extends View {
   fold(id, cx) { if (this.folded.has(id)) this.folded.delete(id); else this.folded.add(id); localStorage.setItem("folded", JSON.stringify([...this.folded])); cx.notify(); }
 
   // Repo, worktree top and branch for a folder, from git, refreshed at most every 20 s.
-  gitOf(cwd) { return cwd ? this.git.get(cwd)?.v ?? null : null; }
+  // Keyed by machine and folder: another machine's git runs there (`on`).
+  gitOf(cwd, on = null) { return cwd ? this.git.get(on ? `${on}:${cwd}` : cwd)?.v ?? null : null; }
   refreshGit(list) {
     const now = Date.now();
-    const due = [...new Set(list.map((x) => x.cwd).filter(Boolean))].filter((c) => now - (this.git.get(c)?.at ?? 0) > 20000);
-    if (!due.length || this.gitBusy) return;
-    this.gitBusy = true;
-    this.cx?.spawn(async (cx) => {
-      for (const c of due) {
-        let v = null;
+    const want = new Map();
+    for (const x of list) if (x.cwd) want.set(x.machine ? `${x.machine}:${x.cwd}` : x.cwd, { c: x.cwd, on: x.machine ?? null });
+    const due = [...want].filter(([k]) => now - (this.git.get(k)?.at ?? 0) > 20000);
+    const by = new Map();
+    for (const entry of due) {
+      const on = entry[1].on;
+      if (!by.has(on)) by.set(on, []);
+      by.get(on).push(entry);
+    }
+    if (!this.cx) return;
+    for (const [on, folders] of by) {
+      if (this.gitBusy.has(on)) continue;
+      this.gitBusy.add(on);
+      this.cx.spawn(async (cx) => {
         try {
-          const r = await exec("git", ["-C", c, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel", "--abbrev-ref", "HEAD"]);
-          if (r.code === 0) {
-            const [common, top, branch] = r.stdout.trim().split("\n");
-            const main = common.replace(/\/\.git\/?$/, "");
-            v = { repo: main.split("/").pop(), main, top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
+          for (const [key, { c }] of folders) {
+            let v = null;
+            try {
+              const r = await exec("git", ["-C", c, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel", "--abbrev-ref", "HEAD"], on ? { on } : undefined);
+              if (r.code === 0) {
+                const [common, top, branch] = r.stdout.trim().split("\n");
+                const main = common.replace(/\/\.git\/?$/, "");
+                v = { repo: main.split("/").pop(), main, top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
+              }
+            } catch {}
+            this.git.set(key, { v, at: Date.now() });
           }
-        } catch {}
-        this.git.set(c, { v, at: Date.now() });
-      }
-      this.gitBusy = false;
-      cx.notify();
-    });
+        } finally {
+          this.gitBusy.delete(on);
+          cx.notify();
+        }
+      });
+    }
   }
 
   // Spaces in Herdr's order, worktree spaces under their repo's main-checkout space (as Herdr's spaces list).
   nestedSpaces() {
     const ps = panes();
-    return nestSpaces(spaces().map((sp) => ({ id: sp.id, sp, g: this.gitOf(spacePlace(sp, ps)) })));
+    const by = new Map();
+    for (const sp of spaces()) {
+      const on = sp.machine ?? null;
+      if (!by.has(on)) by.set(on, []);
+      by.get(on).push({ id: sp.id, sp, g: this.gitOf(spacePlace(sp, ps), on) });
+    }
+    const nested = [...by.values()].flatMap((rows) => nestSpaces(rows));
+    const trees = new Map(nested.map((r) => [r.id, r.tree]));
+    return spaceEntries(nested.map((r) => r.sp), this.machineList, (m) => this.folded.has(`mc:${m ?? "local"}`))
+      .map((sp) => ({ sp, tree: trees.get(sp.id) ?? null }));
   }
 
   spaceRow(t, sp, mine, kidsOf, tree = null) {
@@ -581,7 +741,7 @@ export default class Maestro extends View {
       .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
     const menu = () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } });
-    const g = this.gitOf(spacePlace(sp, panes()));
+    const g = this.gitOf(spacePlace(sp, panes()), sp.machine);
     return v_flex().mt(tree ? 2 : 6).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(h_flex().id(`space-${sp.id}`).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
       .when(sp.active, (el) => el.bg(t.selected)).hover((st) => st.bg(sp.active ? t.selected : t.hover))
       .on_click(() => run("space.select", { id: sp.id }))
@@ -601,7 +761,7 @@ export default class Maestro extends View {
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
-      .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
+      .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: this.argvFor(sp.machine) }),
         svg("mods/workspace-chrome/plus.svg").size(13)))
       .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
@@ -615,7 +775,7 @@ export default class Maestro extends View {
     this.wtMenu = m;
     const at = spacePlace(sp, panes());
     if (g.linked && at) this.cx?.spawn(async (cx) => {
-      try { const r = await exec("git", ["-C", at, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"]); m.dirty = r.code === 0 ? r.stdout.trim() !== "" : true; } catch { m.dirty = true; }
+      try { const r = await exec("git", ["-C", at, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], sp.machine ? { on: sp.machine } : undefined); m.dirty = r.code === 0 ? r.stdout.trim() !== "" : true; } catch { m.dirty = true; }
       cx.notify();
     });
     this.cx?.notify();
@@ -642,6 +802,46 @@ export default class Maestro extends View {
       .child(item("new", "New worktree", () => this.openWorktree(sp, "new")))
       .child(item("open", "Open worktree", () => this.openWorktree(sp, "open")))
       .when(g.linked, (el) => el.child(item("rm", "Remove worktree", () => this.openWorktree(sp, "remove"), why)));
+  }
+
+  // A machine's header once another machine is known (as Herdr's Spaces sidebar): fold,
+  // connection dot, + new space there; a folded machine's agents still join agent order.
+  machineHeader(t, e, roots, kidsOf, order, narrow) {
+    const ids = new Set(e.spaces.map((sp) => sp.id));
+    const mine = roots.filter((x) => ids.has(x.a.space));
+    if (e.folded) for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
+    const all = this.flat(mine, kidsOf);
+    const worst = all.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
+    const doc = machines().find((k) => (k.name ?? null) === e.name)?.layout;
+    const connected = !e.name || e.state === "connected" || (e.state == null && doc === "ready");
+    const tag = e.name ?? "local";
+    const add = () => run("space.new", { machine: e.name ?? "" });
+    const fold = (_e, cx) => this.fold(e.id, cx);
+    const dot = div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 ?? t.done : t.dim);
+    const icon = svg(`mods/workspace-chrome/${e.name ? "server" : "monitor"}.svg`).size(13).flex_none();
+    if (narrow) return h_flex().id(`machine-${tag}`).h(22).flex_none().justify_center().items_center().gap(3).text_color(t.dim)
+      .hover((st) => st.bg(t.hover)).tooltip(e.name ?? "This computer").on_click(fold).child(icon).child(dot);
+    const head = h_flex().id(`machine-${tag}`).mt(8).h(26).flex_none().px(8).gap(7).items_center().rounded(6).text_size(11).text_color(t.dim)
+      .cursor_pointer().hover((st) => st.bg(t.hover))
+      .on_click(fold)
+      .child(icon)
+      .child(div().flex_1().min_w(0).truncate().child(e.name ?? "This computer"))
+      .when(e.folded && worst !== "idle", (el) => el.child(this.statusDot(t, worst)))
+      .when(e.folded && all.length > 0, (el) => el.child(div().flex_none().child(String(all.length))))
+      .when(!connected, (el) => el.child(div().flex_none().child(String(e.state ?? doc ?? "asleep").replace(/_/g, " "))))
+      .when(connected, (el) => el.child(div().id(`machine-add-${tag}`).flex_none().px(4).rounded(4).tooltip("New space there")
+        .hover((st) => st.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); add(); }).child("+")))
+      .child(dot)
+      .child(svg(`mods/workspace-chrome/chevron-${e.folded ? "right" : "down"}.svg`).size(11).flex_none());
+    if (e.folded || e.spaces.length) return head;
+    const empty = doc === "loading"
+      ? div().id(`machine-loading-${tag}`).h(28).flex_none().px(8).flex().items_center().text_size(12).text_color(t.dim).child("Loading…")
+      : h_flex().id(`machine-new-${tag}`).h(28).flex_none().px(8).gap(7).items_center().rounded(7).text_size(12).text_color(t.dim)
+        .when(connected, (el) => el.hover((st) => st.bg(t.hover).text_color(t.foreground)).on_click(add))
+        .child(svg("mods/workspace-chrome/plus.svg").size(12)).child(connected ? "New space there" : "No spaces");
+    return v_flex().flex_none().child(head).child(empty);
   }
 
   railSpace(t, sp, mine) {
@@ -801,7 +1001,7 @@ export default class Maestro extends View {
     const model = snap?.model?.display_name ?? s?.model ?? s?.lastModel ?? null;
     const effort = s?.effort ?? null;
     const ctx = snap?.context_window?.used_percentage;
-    const g = this.gitOf(x.cwd);
+    const g = this.gitOf(x.cwd, x.machine);
     const rows = s ? treeRows(s, now, keepMs()) : [];
     const running = rows.filter((r) => r.status === "running").length;
     const kv = (k, v) => v == null || v === "" ? null : h_flex().gap(8).text_size(12)
@@ -937,16 +1137,17 @@ export default class Maestro extends View {
   }
 
   // Worktree detail for the footer: changed files, diff size, short sha and main repo root (20 s cache).
-  gitDetail(cwd) {
+  gitDetail(cwd, on = null) {
     if (!cwd) return null;
     this.detail ??= new Map();
-    const d = this.detail.get(cwd);
+    const key = on ? `${on}:${cwd}` : cwd;
+    const d = this.detail.get(key);
     if (!d?.busy && Date.now() - (d?.at ?? 0) > 20000) {
-      this.detail.set(cwd, { v: d?.v ?? null, at: d?.at ?? 0, busy: true });
+      this.detail.set(key, { v: d?.v ?? null, at: d?.at ?? 0, busy: true });
       this.cx?.spawn(async (cx) => {
         let v = null;
         try {
-          const git = (...args) => exec("git", ["-C", cwd, ...args]).then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
+          const git = (...args) => exec("git", ["-C", cwd, ...args], on ? { on } : undefined).then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
           const [roots, sha, stat, status] = await Promise.all([
             git("rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"),
             git("rev-parse", "--short", "HEAD"),
@@ -964,7 +1165,7 @@ export default class Maestro extends View {
             };
           }
         } catch {}
-        this.detail.set(cwd, { v, at: Date.now(), busy: false });
+        this.detail.set(key, { v, at: Date.now(), busy: false });
         cx.notify();
       });
     }
@@ -1007,8 +1208,8 @@ export default class Maestro extends View {
     const effort = s?.effort ?? null;
     const ctx = snap?.context_window?.used_percentage;
     const up = cost?.total_duration_ms;
-    const g = this.gitOf(x.cwd);
-    const gd = this.gitDetail(x.cwd);
+    const g = this.gitOf(x.cwd, x.machine);
+    const gd = this.gitDetail(x.cwd, x.machine);
     const tilde = (p) => (p ? p.replace(home(), "~") : null);
     const branch = g?.branch ?? x.branch;
     const added = gd ? gd.added : cost?.total_lines_added;
@@ -1067,6 +1268,7 @@ export default class Maestro extends View {
         field("Workspace path", tilde(x.cwd), x.cwd),
         field("Project path", tilde(gd?.project ?? g?.top), gd?.project ?? g?.top),
         field("Terminal", a.parent ? `${a.address} · child of ${a.parent}` : a.address, a.address),
+        field("Machine", x.machine),
       ].filter(Boolean))
       .when(sched.length > 0, (el) => el.child(v_flex().gap(2)
         .child(div().text_size(11).text_color(t.dim).child(`Beats ${sched.length}`))
@@ -1135,7 +1337,7 @@ export default class Maestro extends View {
       .child(h_flex().gap(6).items_center()
         .child(this.pet(x, 13))
         .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address)))
-      .child(div().truncate().text_size(11).text_color(t.dim).child([x.key, snap?.context_window && `ctx ${snap.context_window.used_percentage}%`, snap?.ai_used && `${snap.ai_used.formatted} AIC`].filter(Boolean).join(" · ")))
+      .child(div().truncate().text_size(11).text_color(t.dim).child([x.machine, x.key, snap?.context_window && `ctx ${snap.context_window.used_percentage}%`, snap?.ai_used && `${snap.ai_used.formatted} AIC`].filter(Boolean).join(" · ")))
       .when(Boolean(why) || running > 0, (el) => el.child(h_flex().gap(6).text_size(11)
         .when(Boolean(why), (e2) => e2.child(div().px(5).rounded(4).bg(t.blocked).text_color(t.background).child(why)))
         .when(running > 0, (e2) => e2.child(div().text_color(t.working).child(`${running} subagent${running > 1 ? "s" : ""} running`)))))

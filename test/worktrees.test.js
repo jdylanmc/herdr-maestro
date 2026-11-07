@@ -102,7 +102,7 @@ function menuFor(sessions, space, dirty = false) {
     return el;
   };
   const source = readFileSync(new URL("../mods/maestro/main.js", import.meta.url), "utf8");
-  const method = source.slice(source.indexOf("  worktreeMenu("), source.indexOf("  railSpace("));
+  const method = source.match(/  worktreeMenu\([\s\S]*?\n  }/)[0];
   const view = runInNewContext(`({${method}})`, { h_flex: element, v_flex: element, div: element, svg: element });
   view.sessions = () => sessions;
   view.wtMenu = { id: space, dirty };

@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { spacePlace } from "../mods/maestro/wtlib.js";
+import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
+import { machineOf, spaceEntries } from "../mods/maestro/machines.js";
 
-function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null } = {}) {
+function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
@@ -34,13 +35,15 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     focused: () => focus,
     panes: () => paneList,
     spaces: () => spaceList,
-    spacePlace,
+    machines: () => [],
+    exec: execImpl,
+    nestSpaces, spacePlace, machineOf, spaceEntries,
     layout: () => null,
     setAgentOrder() {},
     agents: () => [],
     theme: () => ({}),
     run: (command, args) => commands.push({ command, args: { ...args } }),
-    localStorage: { getItem: () => null },
+    localStorage: { getItem: () => null, setItem() {} },
   });
   const source = readFileSync(new URL(`../mods/${name}/main.js`, import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
@@ -85,6 +88,51 @@ test("keyboard navigation preserves nested worktree rows and refreshes empty spa
   assert.equal(refreshed.length, 1);
   assert.equal(refreshed[0].cwd, sp.folder);
   assert.equal(mod.nav[0].key, "sp:worktree");
+});
+
+test("render refreshes a remote shell-only space with remote Git and no local lookup", async () => {
+  const calls = [];
+  const sp = { id: "box/s1", folder: "/remote/repo", machine: "box" };
+  const { mod, cx, tasks } = loadMod("maestro", {
+    spaceList: [sp],
+    execImpl: async (command, args, options) => {
+      calls.push([command, args[1], options?.on ?? null]);
+      return { code: 0, stdout: "/remote/repo/.git\n/remote/repo\nfeature\n" };
+    },
+  });
+  mod.sessions = () => [];
+  mod.watchBlocked = () => {};
+  mod.nestedSpaces = () => [];
+  mod.attentionStrip = () => null;
+  mod.render(cx);
+  assert.equal(tasks.length, 1);
+  await tasks.pop()(cx);
+  assert.deepEqual(calls, [["git", sp.folder, "box"]]);
+  assert.equal(mod.gitOf(sp.folder, "box").branch, "feature");
+  assert.equal(mod.gitOf(sp.folder), null);
+});
+
+test("keyboard navigation can reopen a machine when every machine is folded", async () => {
+  const sp = { id: "box/s1", name: "Remote", folder: "/remote/repo", machine: "box" };
+  const { mod, cx } = loadMod("maestro", { spaceList: [sp] });
+  mod.sessions = () => [];
+  mod.watchBlocked = () => {};
+  mod.refreshGit = () => {};
+  mod.attentionStrip = () => null;
+  mod.machineList = [{ name: "box", state: "connected" }];
+  mod.folded = new Set(["mc:local", "mc:box"]);
+  mod.handle = { focus() {}, is_focused: () => true };
+  const keyboardCx = { ...cx, sleep: async () => {}, stop_propagation() {} };
+  mod.render(cx);
+  assert.deepEqual(Array.from(mod.nav, (n) => n.key), ["mc:local", "mc:box"]);
+  await mod.keyboard(keyboardCx);
+  mod.render(cx);
+  mod.navKey({ key: "down" }, keyboardCx);
+  assert.equal(mod.cursor, "mc:box");
+  mod.navKey({ key: "enter" }, keyboardCx);
+  assert.equal(mod.folded.has("mc:box"), false);
+  mod.render(cx);
+  assert.ok(mod.nav.some((n) => n.key === "sp:box/s1"));
 });
 
 for (const initialToken of [undefined, 100]) {

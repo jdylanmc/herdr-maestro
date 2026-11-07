@@ -94,6 +94,14 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** pane × controls let their press propagate to Herdr's native pane focus handler before the click resolves the focused mod pane. Window controls still stop presses to avoid dragging. Regression tests cover a terminal or another copy initially focused, both mods, and sole-pane tab closure.
 **Closes with:** a documented host-pane ID for every mod pane body.
 
+### G-17 - Another machine's Maestro state is not visible from here
+
+**Wanted:** the same subagent trees, metrics, tags, moods and notifications for agents in spaces on other machines (`hc machine ls`).
+**Blocked by:** `watchFolder`, `fs/promises` (`readdir`) and `writeTextFile` act on this machine only; with `{ on }` a mod can only `exec` and `readTextFile`. The status-line bridge and the `maestro` CLI on that machine write under its own Herdr home, and a mod cannot put Maestro's helper there without writing remote files.
+**Shipped:** per machine, `exec("node", ["-e", probe], { on })` finds its home, Herdr home and whether `mods/maestro/helper.mjs` exists there (again after 5 min, 1 min after a failure). With the helper: lock/process binding (`hc get <machine>/tN` foreground pid), `events.jsonl` tails, git (`exec("git", …, { on })`) and status-line snapshots (`readTextFile(…, { on })`, polled every 15 s, not watched). Snapshot/binding/tail passes run independently of local refresh and other machines, with one in-flight pass per machine; slow passes skip timer ticks rather than overlap. Without Node or the helper: Herdr's status and title only, no subagents or metrics. Agent records (`maestro tag/mood/name/icon`) and `maestro notify` from remote agents are not read.
+**Evidence:** a temporary loopback machine (`hc machine add --via 'sh -c' --temp --session <scratch>`): `hc exec --on` ran the probe and `helper.mjs procs`/`locks`; `hc get <machine>/t1 --json` returned `foreground.pid`. Not measured: real ssh latency, Windows remotes, the sidebar with a real remote space (temporary machines get no spaces).
+**Closes with:** `watchFolder`/`readdir` with `{ on }`, or a mod-shipped helper Herdr installs on each machine.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`
