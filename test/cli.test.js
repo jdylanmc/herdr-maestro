@@ -44,6 +44,18 @@ test("unknown commands and invalid arguments exit non-zero without writing", (t)
   assert.deepEqual(readdirSync(home), []);
 });
 
+test("spawn rejects missing or empty --agent values before creating or launching anything", (t) => {
+  const { home, maestro } = setup(t);
+  for (const suffix of [["--agent"], ["--agent", ""], ["--agent", "   "], ["--agent", "--bg"]]) {
+    const r = maestro(["spawn", "--worktree", "review", "--task", "review changes", ...suffix],
+      { HC_TERMINAL_ID: TERM, PATH: "" });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /usage: --agent <name>/);
+    assert.equal(r.out, null);
+  }
+  assert.deepEqual(readdirSync(home), []);
+});
+
 test("icon, mood, tag, and name update this terminal's record", (t) => {
   const { maestro, record } = setup(t);
   assert.deepEqual(maestro(["icon", "rocket", "#AA00ff"]).out, { icon: "rocket", color: "#AA00ff" });

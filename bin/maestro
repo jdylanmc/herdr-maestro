@@ -220,7 +220,11 @@ const commands = {
       else if (a === "--worktree") opt.worktree = args[++i];
       else if (a === "--herdr-space" || a === "--sibling") opt.kindFlag = a;
       else if (a === "--bg") opt.bg = true;
-      else if (a === "--agent") opt.agent = args[++i];
+      else if (a === "--agent") {
+        const value = args[++i];
+        if (!value?.trim() || value.startsWith("-")) fail("usage: --agent <name>");
+        opt.agent = value;
+      }
       else if (a === "--") { opt.argv = args.slice(i + 1); break; }
       else if (!opt.task) opt.task = a;
     }
