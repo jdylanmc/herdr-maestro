@@ -3,7 +3,6 @@
 // files and run programs. Runs on any machine with Node, which Copilot CLI requires.
 //
 //   helper.mjs tail <file> <offset> <max>   -> "<size>\n<cut|whole>\n<bytes from offset>"
-//   helper.mjs recent <dir> <limit> <sinceMs> -> JSON [{ id, mtime }] newest first
 //   helper.mjs locks <dir>                   -> JSON [{ id, pid }] for inuse.<pid>.lock files
 //   helper.mjs procs                         -> JSON [[pid, ppid], ...]
 //   helper.mjs run <argv...>                 -> runs argv without inherited CMUX_* variables
@@ -35,18 +34,6 @@ function tail(file, offset, max) {
   } finally {
     closeSync(fd);
   }
-}
-
-function recent(dir, limit, since) {
-  const out = [];
-  for (const id of readdirSync(dir)) {
-    try {
-      const m = statSync(join(dir, id)).mtimeMs;
-      if (m >= Number(since)) out.push({ id, mtime: m });
-    } catch {}
-  }
-  out.sort((a, b) => b.mtime - a.mtime);
-  process.stdout.write(JSON.stringify(out.slice(0, Number(limit))));
 }
 
 function locks(dir) {
@@ -87,7 +74,6 @@ function runClean(argv) {
 if (cmd === "run") runClean(args);
 else try {
   if (cmd === "tail") tail(args[0], args[1], args[2]);
-  else if (cmd === "recent") recent(args[0], args[1] ?? 60, args[2] ?? 0);
   else if (cmd === "locks") locks(args[0]);
   else if (cmd === "procs") procs();
   else if (cmd === "pets") { const { renderAll } = await import("./pets.mjs"); process.stdout.write(JSON.stringify(renderAll(args[0], args.slice(1)))); }

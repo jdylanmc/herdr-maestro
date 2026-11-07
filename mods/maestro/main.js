@@ -9,7 +9,6 @@ import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 
 const MAX_TAIL = 8_000_000;
-const RECENT_MS = 24 * 3600_000;
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
@@ -82,10 +81,10 @@ export default class Maestro extends View {
     this.fallback = new Map();  // terminal address -> session id (process ancestry)
     this.logs = new Map();      // session id -> { s, offset, carry, path, busy }
     this.collapsed = new Set(); // terminal addresses whose subagent tree is folded
-    this.recent = [];           // { id, name, cwd, updated } of sessions not running
-    this.showRecent = true;
     this.records = new Map();   // terminal address -> agent-written record (parent, tags, mood, name)
-    this.board = props()?.view === "board";
+    this.view = props()?.view ?? "list"; // list (sidebar), footer (focused agent), board (window)
+    this.board = this.view === "board";
+    this.primary = this.view === "list";
     this.cx = cx;
     this.folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
@@ -101,7 +100,7 @@ export default class Maestro extends View {
         cx.notify();
       }
     });
-    if (!this.board) cx.spawn(async (cx) => {
+    if (this.primary) cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
         if (c === "board") this.openBoard();
@@ -109,8 +108,6 @@ export default class Maestro extends View {
         cx.notify();
       }
     });
-    cx.spawn(async (cx) => { await this.loadRecent(); cx.notify(); });
-    cx.timer.every(30000, (cx) => cx.spawn(async (cx) => { await this.loadRecent(); cx.notify(); }));
     cx.timer.every(3000, (cx) => cx.spawn(async (cx) => { await this.tailAll(); cx.notify(); }));
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
   }
@@ -120,13 +117,13 @@ export default class Maestro extends View {
     const out = `${dataDir()}/pets`;
     const roots = [`${home()}/.codex/pets`, `${home()}/Applications/CMUX Maestro Preview.app/Contents/Extensions/CMUX Maestro Preview Extension.appex/Contents/Resources/maestro-pet.json`, `${dataDir()}/pet-sources`];
     try { this.pets = JSON.parse(await readTextFile(`${out}/index.json`)); } catch {}
-    if (this.board) return;
+    if (!this.primary) return;
     try { const r = await helper("pets", out, ...roots); if (r.code === 0) this.pets = JSON.parse(r.stdout); } catch {}
   }
 
   async refresh() {
     await this.loadRecords();
-    if (!this.board) await this.pumpNotifications();
+    if (this.primary) await this.pumpNotifications();
     await this.loadSnaps();
     await this.bindByAncestry();
     await this.tailAll();
@@ -204,23 +201,6 @@ export default class Maestro extends View {
         if (p === fg) { this.fallback.set(a.address, sid); break; }
       }
     }
-  }
-
-  // Session folders touched in the last day, newest first, read from workspace.yaml.
-  async loadRecent() {
-    let ids;
-    try { ids = JSON.parse((await helper("recent", sessionRoot(), 60, Date.now() - RECENT_MS)).stdout).map((x) => x.id); } catch { return; }
-    const out = [];
-    for (const id of ids) {
-      let y = null;
-      try { y = await readTextFile(`${sessionRoot()}/${id}/workspace.yaml`); } catch {}
-      if (!y) continue;
-      const f = (k) => y.match(new RegExp(`^${k}: (.*)$`, "m"))?.[1]?.trim() ?? null;
-      const updated = Date.parse(f("updated_at"));
-      if (!updated || Date.now() - updated > RECENT_MS) continue;
-      out.push({ id, name: f("name") ?? id.slice(0, 8), cwd: f("cwd"), updated });
-    }
-    this.recent = out.sort((a, b) => b.updated - a.updated);
   }
 
   sessionFor(addr) {
@@ -311,6 +291,7 @@ export default class Maestro extends View {
     const now = Date.now();
     const list = this.sessions();
     if (this.board) return this.renderBoard(t, list, now);
+    if (this.view === "footer") return this.footer(t, list, now);
     this.refreshGit(list);
     const byAddr = new Map(list.map((x) => [x.a.address, x]));
     const kidsOf = new Map();
@@ -350,21 +331,6 @@ export default class Maestro extends View {
       }
     }
     setAgentOrder(order);
-    const running = new Set(list.map((x) => x.id).filter(Boolean));
-    const dismissed = new Set(shared("maestro.dismissed") ?? []);
-    const recent = narrow ? [] : this.recent.filter((r) => !running.has(r.id) && !dismissed.has(r.id));
-    if (recent.length) {
-      rows.push(h_flex().id("recent-head").px(10).pt(14).pb(4).gap(6).items_center()
-        .child(div().id("recent-tog").text_size(11).text_color(t.dim).hover((st) => st.text_color(t.foreground))
-          .on_click((_e, cx) => { this.showRecent = !this.showRecent; cx.notify(); })
-          .child(`${this.showRecent ? "▾" : "▸"} Recent`))
-        .child(div().text_size(11).text_color(t.dim).child(String(recent.length)))
-        .child(div().flex_1())
-        .child(div().id("recent-clear").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-          .on_click(() => setShared("maestro.dismissed", [...dismissed, ...recent.map((r) => r.id)].slice(-500)))
-          .child("clear")));
-      if (this.showRecent) for (const r of recent) rows.push(this.recentRow(t, r, dismissed, now));
-    }
     const counts = { blocked: 0, working: 0 };
     for (const x of list) if (counts[x.a.status] != null) counts[x.a.status]++;
     const icon = (id, name, tip, on) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
@@ -381,8 +347,7 @@ export default class Maestro extends View {
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 6).pb(8).overflow_y_scrollbar().mode("always")
         .when(spaces().length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No spaces yet.")))
-        .children(rows))
-      .when(!narrow, (el) => el.child(this.footer(t, list, now)));
+        .children(rows));
   }
 
   walk(x, kidsOf, fn) { fn(x); for (const k of kidsOf.get(x.a.address) ?? []) this.walk(k, kidsOf, fn); }
@@ -613,7 +578,7 @@ export default class Maestro extends View {
   footer(t, list, now) {
     const f = focused();
     const x = list.find((y) => y.a.address === f?.terminal) ?? list.find((y) => y.a.focused);
-    if (!x) return div();
+    if (!x) return div().size_full().bg(t.chrome);
     const { a, snap, s } = x;
     const sched = s ? [...s.schedules.values()] : [];
     const cost = snap?.cost;
@@ -632,7 +597,7 @@ export default class Maestro extends View {
       const i = ok.findIndex((p) => p.id === petId);
       setShared("maestro.pets", { ...(shared("maestro.pets") ?? {}), [x.tagKey]: ok[(i + 1) % ok.length].id });
     };
-    return v_flex().id("maestro-footer").flex_none().max_h(380).overflow_y_scrollbar().border_t(1).border_color(t.border).px(12).pt(10).pb(10).gap(8).bg(t.chrome)
+    return v_flex().id("maestro-footer").size_full().min_h(0).overflow_y_scrollbar().px(12).pt(10).pb(10).gap(8).bg(t.chrome)
       .child(h_flex().gap(12).items_center()
         .child(div().id("pet-box").size(64).flex_none().rounded(10).border_1().border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .tooltip(`${this.petOf(x)?.name ?? "No pet"} · ${this.petMood(x)} — click for another pet`)
@@ -733,17 +698,4 @@ export default class Maestro extends View {
       .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
   }
 
-  recentRow(t, r, dismissed, now) {
-    const where = place(r.cwd);
-    const resume = () => run("tab.new", { ...(focused()?.space ? { space: focused().space } : {}), ...(r.cwd ? { folder: r.cwd } : {}), argv: copilotArgv("--resume", r.id) });
-    return h_flex().id(`r-${r.id}`).px(8).py(4).gap(8).items_center().rounded(8).text_size(12)
-      .hover((st) => st.bg(t.hover))
-      .child(div().size(6).rounded(3).bg(t.idle))
-      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(r.name))
-      .child(div().text_size(11).text_color(t.dim).child(`${where.repo ?? where.org} · ${ago(now - r.updated)} ago`))
-      .child(div().id(`res-${r.id}`).px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.raised).text_color(t.foreground))
-        .on_click(resume).child("resume"))
-      .child(div().id(`dis-${r.id}`).px(4).text_color(t.dim).hover((st) => st.text_color(t.foreground))
-        .on_click(() => setShared("maestro.dismissed", [...dismissed, r.id].slice(-500))).child("×"));
-  }
 }

@@ -36,7 +36,6 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
   its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there.
-- **Recent**: sessions from the last 24 h that are not running, with resume and dismiss.
 
 **Pets** are [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`) and cmux Maestro's own
 pet, rendered once by `mods/maestro/pets.mjs` into one GIF per mood under

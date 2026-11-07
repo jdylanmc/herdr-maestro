@@ -43,15 +43,44 @@
           }
         },
         {
-          "id": "maestro",
-          "type": "block",
+          "id": "maestro-stack",
+          "type": "column",
           "size": {
             "weight": 1
           },
-          "min": 90,
-          "content": {
-            "mod": "maestro"
-          }
+          "resizable": true,
+          "divider": {
+            "width": 1,
+            "color": "border"
+          },
+          "children": [
+            {
+              "id": "maestro",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "min": 90,
+              "content": {
+                "mod": "maestro"
+              }
+            },
+            {
+              "id": "maestro-footer",
+              "type": "block",
+              "size": {
+                "px": 250
+              },
+              "min": 96,
+              "max": 640,
+              "content": {
+                "mod": "maestro",
+                "props": {
+                  "view": "footer"
+                }
+              }
+            }
+          ]
         },
         {
           "id": "sidebar-footer",
