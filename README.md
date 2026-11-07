@@ -148,6 +148,8 @@ Workers are interactive tabs, or pane-less sub-agents with `--bg`. Worktrees are
 `~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's, unless `--bg`
 keeps the worker pane-less in its parent's space. `worktree ls` shows
 each one's kind; `rm` refuses while its worker or any live terminal is in it, or the tree is dirty.
+Background `--task` routing supports Copilot; other agents need explicit provider argv
+(`-- argv...`) or a visible launch so Herdr can deliver the task.
 
 ## How it works
 

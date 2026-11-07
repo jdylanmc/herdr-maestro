@@ -93,6 +93,18 @@ test("spawn --bg starts a pane-less hc child with Maestro labels and record", { 
   assert.equal(rec.background, true);
 });
 
+test("spawn --bg --agent keeps non-Copilot argv and provider identity", { skip }, () => {
+  const r = maestro(["spawn", "--bg", "--agent", "claude", "--cwd", ROOT]);
+  assert.equal(r.code, 0, r.err);
+  const run = r.acts.find((c) => c[1] === "run");
+  assert.deepEqual(run.slice(-2), ["run", "claude"]);
+  assert.ok(!r.acts.some((c) => c[0] === "herdr-app"));
+  assert.equal(r.out.agent, "claude");
+  const rec = JSON.parse(readFileSync(join(DIR, "home", "data", "maestro", "agents", "t7.json"), "utf8"));
+  assert.equal(rec.agent, "claude");
+  assert.equal(rec.background, true);
+});
+
 test("wait: children by default plus tab workers; explicit targets; --any returns the first", { skip }, () => {
   const all = maestro(["wait", "--all"]);
   assert.deepEqual(all.acts.map((c) => c.slice(1)).sort(), [["wait", "--children", "all", "--json"], ["wait", "t4", "--json"]]);

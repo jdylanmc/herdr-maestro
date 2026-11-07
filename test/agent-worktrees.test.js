@@ -54,3 +54,17 @@ for (const kind of ["sibling", "herdr"]) for (const provider of ["copilot", "cla
     assert.equal(result.agent, provider);
   });
 }
+
+test("unsupported non-Copilot background tasks fail before creating a worktree", () => {
+  const cli = runInNewContext(`({${method}})`, {
+    agentlib, process: { cwd: () => "/repo" },
+    readFileSync: () => "{}", join: (...parts) => parts.join("/"), HOME: "/app",
+    DEFAULT_ARGV: agentlib.DEFAULT_ARGV, needMe: () => "t1",
+    makeWorktree: () => { assert.fail("must reject before creating a checkout"); },
+    fail: (message) => { throw new Error(message); },
+  });
+  for (const provider of ["claude", "codex"]) {
+    assert.throws(() => cli.spawn(["--bg", "--worktree", "review", "--agent", provider, "--task", "review changes"]),
+      /background tasks for this agent need explicit argv/);
+  }
+});

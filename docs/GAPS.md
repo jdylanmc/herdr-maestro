@@ -116,6 +116,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** rendering validation uses a short temporary app home instead.
 **Closes with:** placing the control socket under a short runtime directory independently of `HERDR_APP_HOME`.
 
+### G-16 - Background launches have no provider-neutral first task
+
+**Wanted:** combine `maestro spawn --bg --agent <name>` with `--task` for non-Copilot agents.
+**Evidence:** `hc run --help` exposes argv and templates, but no first-task option; Herdr's `task` routing is available on `tab.new` and `space.new`, not raw background launches.
+**Shipped:** Copilot background tasks retain `-i`. Other agents can start background sessions without a task, or use explicit provider argv; generic background tasks fail before creating a checkout rather than silently losing the prompt.
+**Closes with:** provider-neutral task routing for `hc run`.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`
