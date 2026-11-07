@@ -477,6 +477,7 @@ export default class Maestro extends View {
       address: x.a.address,
       tab: x.a.pane ? x.a.tab ?? null : null,
       status: x.a.status,
+      failed: x.failed,
       needs: x.a.status === "blocked" || NEEDS_YOU.has(x.s ? attention(x.s) : null),
       herdrChimes: herdrSounds && Boolean(x.a.pane) && x.a.status === "blocked",
       worker: Boolean(x.rec.launcher ?? labels.get(x.a.address)?.["maestro.parent"]),
@@ -601,7 +602,7 @@ export default class Maestro extends View {
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
       .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
         svg("mods/workspace-chrome/plus.svg").size(13)))
-      .when(!sp.machine, (el) => el.child(btn("spf", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
+      .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
   }

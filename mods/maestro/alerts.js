@@ -6,7 +6,7 @@ export const pinFirst = (p, q) => Number(Boolean(q?.pinned)) - Number(Boolean(p?
 export const NEEDS_YOU = new Set(["question", "permission"]);
 
 // One step over the live agents. `mem` (Map address -> state) is updated in place.
-// Each item: { address, tab, status, needs, herdrChimes, worker, tabSettled }.
+// Each item: { address, tab, status, failed, needs, herdrChimes, worker, tabSettled }.
 // opts: { sounds, settle, debounceMs }. Returns the actions to run, at most one sound.
 export function alertStep(mem, items, now, opts) {
   const actions = [];
@@ -24,7 +24,7 @@ export function alertStep(mem, items, now, opts) {
     // Someone else showed the tab again (after Herdr reported our settle): no longer ours to bring back.
     if (m.mine && it.tabSettled) m.confirmed = true;
     else if (m.mine && m.confirmed) m.mine = false;
-    const want = it.needs || it.status === "working" || it.status === "blocked" ? "unsettle"
+    const want = it.failed || it.needs || it.status === "working" || it.status === "blocked" ? "unsettle"
       : (it.status === "done" || it.status === "idle") && m.worked ? "settle" : null;
     if (want !== m.want) { m.want = want; m.since = now; }
     if (!opts.settle || !want || now - m.since < opts.debounceMs) continue;

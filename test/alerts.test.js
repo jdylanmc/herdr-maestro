@@ -39,6 +39,32 @@ test("settles a worker's tab after it worked and finished, debounced, then unset
   assert.deepEqual(alertStep(mem, [w("working", { tabSettled: true })], 12000, on), [{ type: "unsettle", tab: "tab2", address: "t2" }]);
 });
 
+test("never settles failed workers, including errors arriving during the finish debounce", () => {
+  for (const status of ["idle", "done"]) {
+    for (const delayed of [false, true]) {
+      const mem = new Map();
+      alertStep(mem, [w("working")], 0, on);
+      alertStep(mem, [w(status, { failed: !delayed })], 1, on);
+      assert.deepEqual(alertStep(mem, [w(status, { failed: true })], 1001, on), []);
+      assert.deepEqual(alertStep(mem, [w(status, { failed: true })], 5000, on), []);
+    }
+  }
+});
+
+test("brings a failed worker's tab back only if Maestro settled it", () => {
+  for (const ours of [false, true]) {
+    const mem = new Map();
+    alertStep(mem, [w("working")], 0, on);
+    if (ours) {
+      alertStep(mem, [w("done")], 1, on);
+      alertStep(mem, [w("done")], 1001, on);
+    }
+    alertStep(mem, [w("idle", { failed: true, tabSettled: true })], 2000, on);
+    assert.deepEqual(alertStep(mem, [w("idle", { failed: true, tabSettled: true })], 3000, on),
+      ours ? [{ type: "unsettle", tab: "tab2", address: "t2" }] : []);
+  }
+});
+
 test("leaves non-workers and tabs someone else showed again alone", () => {
   const mem = new Map();
   alertStep(mem, [w("working", { worker: false })], 0, on);
