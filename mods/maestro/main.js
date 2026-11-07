@@ -152,8 +152,16 @@ export default class Maestro extends View {
     }
   }
 
+  // Board and pets replace the terminals in the main area (layout stack "work-stack");
+  // again shows the terminals. Layouts without the stack open them as windows.
+  showView(child, overlay) {
+    const stack = find(layout(), "work-stack");
+    if (!stack) { openOverlay(overlay); return; }
+    run("layout.select", { stack: "work-stack", child: stack.active === child ? "main" : child });
+  }
+
   openPets() {
-    openOverlay({ kind: "window", mod: "maestro-pets", key: "maestro-pets", width: 980, height: 680 });
+    this.showView("maestro-pets", { kind: "window", mod: "maestro-pets", key: "maestro-pets", width: 980, height: 680 });
   }
 
   async refresh() {
@@ -554,7 +562,7 @@ export default class Maestro extends View {
     for (const k of kids) this.pushAgent(t, rows, order, k, kidsOf, now, depth + 1);
   }
 
-  focus(x) { run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
+  focus(x) { if (find(layout(), "work-stack")?.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
   title(x) { return x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? (x.a.title ?? "").replace(/ - GitHub Copilot$/, "") ?? x.a.address; }
   task(x) {
     const name = x.snap?.session_name || (x.a.title ?? "").replace(/ - GitHub Copilot$/, "");
@@ -612,7 +620,7 @@ export default class Maestro extends View {
     return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
       .child(div().flex_1().min_w(0)
-        .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("top_left")
+        .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("left_center")
           .trigger(body)
           .content(this.preview(t, x, now, why, tags))));
   }
@@ -855,7 +863,7 @@ export default class Maestro extends View {
   }
 
   openBoard() {
-    openOverlay({ kind: "window", mod: "maestro", props: { view: "board" }, key: "maestro-board", width: 1180, height: 640 });
+    this.showView("maestro-board", { kind: "window", mod: "maestro", props: { view: "board" }, key: "maestro-board", width: 1180, height: 640 });
   }
 
   openTags() {
@@ -888,7 +896,7 @@ export default class Maestro extends View {
         .child(div().flex_1())
         .child(div().id("board-close").px(8).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click(() => closeOverlay(props()?.overlay)).child("×")))
+          .on_click(() => (props()?.overlay ? closeOverlay(props().overlay) : run("layout.select", { stack: "work-stack", child: "main" }))).child("×")))
       .child(h_flex().id("board-cols").flex_1().min_h(0).p(12).gap(10).items_start().children(cols.map((c) =>
         v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(8).gap(8).rounded(10).bg(t.chrome).overflow_y_scrollbar()
           .child(h_flex().gap(6).items_center().pb(2)
@@ -905,7 +913,7 @@ export default class Maestro extends View {
     const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
     return v_flex().id(`card-${a.address}`).p(8).gap(4).rounded(8).bg(t.surface).border_1().border_color(a.focused ? t.accent : t.border)
       .hover((st) => st.bg(t.hover))
-      .on_click(() => run(a.pane ? "agent.focus" : "terminal.peek", { terminal: a.address }))
+      .on_click(() => this.focus(x))
       .child(h_flex().gap(6).items_center()
         .child(this.pet(x, 13))
         .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address)))

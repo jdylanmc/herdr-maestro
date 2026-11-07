@@ -2,7 +2,7 @@
 // Opened by maestro's `pets` command (openOverlay kind "window", key "maestro-pets").
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay } from "herdr";
+import { agents, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay, run } from "herdr";
 import * as fs from "fs/promises";
 import { MOODS, moodRow, moodGif, petRoots, parseChoices, setChoice, chosenPet, resolvePet } from "./petlib.js";
 
@@ -14,7 +14,11 @@ const MONO = "JetBrainsMono Nerd Font Mono";
 const SOURCE = { codex: "Codex", maestro: "Maestro", added: "Added", other: "Other" };
 const ADD_HINT = "maestro pet add <folder or pet.json>";
 
+const back = () => run("layout.select", { stack: "work-stack", child: "main" });
+
 export default class MaestroPets extends View {
+  close() { if (props()?.overlay) closeOverlay(props().overlay); else back(); }
+
   init(_props, cx) {
     this.pets = [];
     this.progress = null;
@@ -115,7 +119,7 @@ export default class MaestroPets extends View {
     const sel = this.pets.find((p) => p.id === this.selected) ?? this.pets.find((p) => p.id === def) ?? this.pets[0] ?? null;
     const code = (text) => div().px(6).rounded(4).bg(t.surface).font_family(MONO).text_color(t.foreground).child(text);
     return v_flex().id("maestro-pets").track_focus(this.handle)
-      .on_key_down((e, cx) => { if (e.key === "escape") { closeOverlay(props()?.overlay); cx.stop_propagation(); } })
+      .on_key_down((e, cx) => { if (e.key === "escape") { this.close(); cx.stop_propagation(); } })
       .size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
       .child(h_flex().px(16).py(10).gap(10).items_center().bg(t.chrome).border_b(1).border_color(t.border)
         .child(div().text_size(16).font_semibold().child("Pets"))
@@ -125,7 +129,7 @@ export default class MaestroPets extends View {
         .child(this.button(t, "rerender", "Re-render all", (cx) => cx.spawn(async (cx) => { await this.rescan(true); cx.notify(); }), { tip: "Render every sheet again (--force)" }))
         .child(div().id("pets-close").px(8).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click(() => closeOverlay(props()?.overlay)).child("×")))
+          .on_click(() => this.close()).child("×")))
       .child(h_flex().flex_1().min_h(0).items_start()
         .child(v_flex().id("pets-grid").flex_1().min_w(0).h_full().overflow_y_scrollbar().p(12)
           .child(this.pets.length ? div().flex().flex_wrap().gap(8).children(this.pets.map((p) => this.card(t, p, p.id === sel?.id, def, list)))
