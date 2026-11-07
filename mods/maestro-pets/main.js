@@ -52,7 +52,7 @@ export default class MaestroPets extends View {
     const live = { default: shared("maestro.pet") ?? null, sessions: shared("maestro.pets") ?? {} };
     return agents().map((a) => {
       const snap = this.snaps.get(a.address);
-      const key = snap?.session_id ?? a.address;
+      const key = (shared("maestro.sessionKeys") ?? {})[a.address] ?? snap?.session_id ?? a.address;
       const pet = resolvePet(this.pets, chosenPet(live, key));
       return { address: a.address, key, name: snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address, pet: pet?.id ?? null, explicit: Boolean(live.sessions[key]), focused: a.focused };
     });

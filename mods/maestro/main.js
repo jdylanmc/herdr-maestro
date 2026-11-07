@@ -243,6 +243,11 @@ export default class Maestro extends View {
   }
 
   async tailAll() {
+    // Other views (the pet pokedex) key sessions the same way: session id, else terminal.
+    if (this.primary) {
+      const keys = Object.fromEntries(this.live().map((a) => [a.address, this.sessionFor(a.address) ?? a.address]));
+      if (JSON.stringify(keys) !== JSON.stringify(shared("maestro.sessionKeys") ?? {})) setShared("maestro.sessionKeys", keys);
+    }
     const ids = new Set(this.live().map((a) => this.sessionFor(a.address)).filter(Boolean));
     await Promise.all([...ids].map((id) => this.tail(id)));
   }
