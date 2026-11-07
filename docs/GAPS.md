@@ -73,6 +73,20 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** the CLI follows the mod's convention itself: `git worktree add [-b <b>] ~/.herdr/worktrees/<repo>/<slug> [HEAD]`, then `herdr-app do space.new {folder, argv, tab}` with no name so Herdr's spaces list nests it under the repo's space. Maestro's sidebar opens the real dialogs (New / Open / Remove worktree). If Herdr moves its root (a constant in `mods/worktree/main.js`), `mods/maestro/wtlib.js` must follow.
 **Closes with:** a `worktree.new {space | folder, branch, argv?}` command, or overlay props for `mod.open`.
 
+### G-14 - Mod commands are not in the command palette
+
+**Wanted:** `maestro.board`, `maestro.tags`, `maestro.pets` (and projection switches) listed with titles in Herdr's palette.
+**Blocked by:** `herdr.d.ts` `commands()`: "Mods' own `<mod>.<command>`s aren't listed"; `app.palette` shows "every command by name, with its key" from that list. `mod.json` documents only `place`, `size`, `title`, `overlay` and `focusable`; it has no command declarations.
+**Shipped:** keys in `keys.json` (`layout:maestro`) and header buttons; README lists them.
+**Closes with:** a `commands` map (name → title) in `mod.json` that the palette shows.
+
+### G-15 - No scroll-into-view for a plain scrolling list
+
+**Wanted:** keep the keyboard-highlighted card visible while arrowing through a long Maestro list.
+**Blocked by:** `gpui-kit.d.ts` offers `scroll_to_item` only on a `VirtualListScrollHandle` (virtual lists of same-shaped items); the sidebar is a nested `overflow_y_scrollbar` tree of mixed rows.
+**Shipped:** highlight without auto-scroll; the mouse wheel still scrolls.
+**Closes with:** a scroll handle (or `scroll_into_view`) for ordinary scrolling elements.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

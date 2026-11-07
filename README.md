@@ -28,6 +28,21 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 | `cmd-shift-b` | Show the board in the main area; again returns to the terminals (Maestro layout) |
 | `cmd-shift-t` | Edit tags of the focused session (Maestro layout) |
 | `cmd-shift-k` | Open the pet pokedex (Maestro layout; `cmd-shift-p` is Herdr's palette) |
+| `cmd-alt-left` (Herdr's `pane.go:left`) | Move the keyboard into the Maestro list (from the footer too) |
+| `↑` / `↓` | Move the highlight between spaces, worktrees and agent cards (list has the keyboard) |
+| `Enter` | Focus the highlighted agent; on a space, switch to it; on a worktree, fold it |
+| `Space` / `→` / `←` | Toggle / unfold / fold the highlighted space, worktree or agent's internal tasks |
+| `Esc` | Give the keyboard back to the terminal (`pane.go` right); closes the board or pokedex in the main area |
+
+**Board and pokedex as a tab or split:** their headers have **Open as tab** (`tab.new` with the mod) and
+**Split beside** (`pane.split` right of the focused pane). The `cmd-shift-b` / `cmd-shift-k` main-area toggle
+is unchanged; × in a tab or split closes that pane (its tab when alone). Maestro's own commands
+(`maestro.board`, `maestro.tags`, `maestro.pets`) are keys only: Herdr's palette lists app commands
+(see `docs/GAPS.md`).
+
+**Theme picker:** the palette icon in the Maestro header lists every Herdr theme (`themes()`) with swatches,
+dark then light. Picking one runs `app.theme`, which sets the shown layout's theme for that appearance
+(Herdr keeps it with the layout's clicks, not in the layout file).
 
 **Hierarchy** (replaces Herdr's separate spaces and agents lists in the Maestro layout)
 - **Space** → **worktree/repo** → **agent card** → its **internal tasks** (Copilot subagents) and

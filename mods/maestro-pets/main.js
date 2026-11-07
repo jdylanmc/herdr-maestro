@@ -2,7 +2,7 @@
 // Opened by maestro's `pets` command (openOverlay kind "window", key "maestro-pets").
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay, run } from "herdr";
+import { agents, panes, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay, run } from "herdr";
 import * as fs from "fs/promises";
 import { MOODS, moodRow, moodGif, petRoots, parseChoices, setChoice, chosenPet, resolvePet } from "./petlib.js";
 
@@ -16,8 +16,33 @@ const ADD_HINT = "maestro pet add <folder or pet.json>";
 
 const back = () => run("layout.select", { stack: "work-stack", child: "main" });
 
+// The pokedex as a mod pane (props.place "pane"): its own tab, or split beside the focused pane.
+// Same as mods/maestro/main.js openModPane/closeModPane (mods cannot share modules, G-10).
+function openModPane(mod, name, extra, how) {
+  const props = { ...extra, place: "pane" };
+  if (how === "tab") { run("tab.new", { name, mod, props }); return; }
+  const f = focused();
+  const pane = f?.pane ?? panes().find((p) => p.tab === f?.tab && p.focused)?.pane ?? panes().find((p) => p.tab === f?.tab)?.pane;
+  run("pane.split", { direction: "right", mod, props, ...(pane ? { pane } : {}) });
+}
+
+function closeModPane(mod) {
+  const f = focused();
+  const mine = panes().filter((p) => p.mod === mod && p.terminal == null);
+  const p = mine.find((q) => q.pane === f?.pane) ?? (mine.filter((q) => q.tab === f?.tab).length === 1 ? mine.find((q) => q.tab === f?.tab) : null) ?? (mine.length === 1 ? mine[0] : null);
+  if (!p) return;
+  if (panes().filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
+  else run("pane.close", { pane: p.pane });
+}
+
 export default class MaestroPets extends View {
-  close() { if (props()?.overlay) closeOverlay(props().overlay); else back(); }
+  close() { if (props()?.place === "pane") return; if (props()?.overlay) closeOverlay(props().overlay); else back(); }
+
+  // × and Esc. close() is also Herdr's teardown hook, so pane closing lives here, not there.
+  dismiss() { if (props()?.place === "pane") closeModPane("maestro-pets"); else this.close(); }
+
+  // After opening as a pane, give the main area (or the window) back.
+  leave() { if (props()?.overlay) closeOverlay(props().overlay); else if (props()?.place !== "pane") back(); }
 
   init(_props, cx) {
     this.pets = [];
@@ -119,7 +144,7 @@ export default class MaestroPets extends View {
     const sel = this.pets.find((p) => p.id === this.selected) ?? this.pets.find((p) => p.id === def) ?? this.pets[0] ?? null;
     const code = (text) => div().px(6).rounded(4).bg(t.surface).font_family(MONO).text_color(t.foreground).child(text);
     return v_flex().id("maestro-pets").track_focus(this.handle)
-      .on_key_down((e, cx) => { if (e.key === "escape") { this.close(); cx.stop_propagation(); } })
+      .on_key_down((e, cx) => { if (e.key === "escape" && props()?.place !== "pane") { this.dismiss(); cx.stop_propagation(); } })
       .size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
       .child(h_flex().px(16).py(10).gap(10).items_center().bg(t.chrome).border_b(1).border_color(t.border)
         .child(div().text_size(16).font_semibold().child("Pets"))
@@ -127,9 +152,11 @@ export default class MaestroPets extends View {
         .child(div().flex_1().min_w(0).child(this.status(t)))
         .child(this.button(t, "rescan", "Rescan", (cx) => cx.spawn(async (cx) => { await this.rescan(false); cx.notify(); }), { tip: "Render new or changed sheets in the background" }))
         .child(this.button(t, "rerender", "Re-render all", (cx) => cx.spawn(async (cx) => { await this.rescan(true); cx.notify(); }), { tip: "Render every sheet again (--force)" }))
+        .child(this.button(t, "pets-tab", "Open as tab", () => { openModPane("maestro-pets", "Pets", {}, "tab"); this.leave(); }, { tip: "Open in a new tab of this space" }))
+        .child(this.button(t, "pets-split", "Split beside", () => { openModPane("maestro-pets", "Pets", {}, "split"); this.leave(); }, { tip: "Open in a pane beside the focused one" }))
         .child(div().id("pets-close").px(8).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click(() => this.close()).child("×")))
+          .on_click(() => this.dismiss()).child("×")))
       .child(h_flex().flex_1().min_h(0).items_start()
         .child(v_flex().id("pets-grid").flex_1().min_w(0).h_full().overflow_y_scrollbar().p(12)
           .child(this.pets.length ? div().flex().flex_wrap().gap(8).children(this.pets.map((p) => this.card(t, p, p.id === sel?.id, def, list)))
