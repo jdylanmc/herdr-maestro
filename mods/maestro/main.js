@@ -661,7 +661,7 @@ export default class Maestro extends View {
 
   tagChips(t, tags) {
     return h_flex().flex_none().gap(4).children(tags.slice(0, 3).map(({ g, mine }) => {
-      const c = palette(t)[hash(g) % palette(t).length];
+      const c = this.tagColor(t, g);
       return div().px(6).h(18).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? t.background : c)
         .bg(mine ? c : c + "22").text_size(11).font_medium().text_color(mine ? t.background : c).child(g);
     }));
@@ -786,7 +786,7 @@ export default class Maestro extends View {
       .child(h_flex().gap(4).items_center()
         .child(this.tagChips(t, [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))]))
         .child(div().id("edit-tags").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-          .on_click(() => openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: snap?.session_name ?? a.address } }))
+          .on_click(() => openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: snap?.session_name ?? a.address, terminal: a.address } }))
           .child("Edit tags…"))
         .child(div().flex_1())
         .child(div().id("mood-preview").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
