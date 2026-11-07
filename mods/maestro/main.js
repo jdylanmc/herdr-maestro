@@ -108,6 +108,7 @@ export default class Maestro extends View {
     this.view = props()?.view ?? "list"; // list (sidebar), footer (focused agent), board (window), themes (popup)
     this.board = this.view === "board";
     this.primary = this.view === "list";
+    this.kbToken = shared("maestro.kbFocus");
     this.cx = cx;
     this.handle = cx.focus_handle();
     if (this.view === "themes") { this.handle.focus(); cx.timer.after(400, () => this.handle.focus()); return; }
@@ -1118,9 +1119,8 @@ export default class Maestro extends View {
   keyboardState() {
     const token = shared("maestro.kbFocus");
     if (this.primary && token !== this.kbToken) {
-      const first = this.kbToken === undefined;
       this.kbToken = token;
-      if (!first && token) this.cx?.spawn(async (cx) => { await this.keyboard(cx); cx.notify(); });
+      if (token) this.cx?.spawn(async (cx) => { await this.keyboard(cx); cx.notify(); });
     }
     if (!this.kb) return;
     if (this.handle.is_focused()) this.kbSeen = true;
