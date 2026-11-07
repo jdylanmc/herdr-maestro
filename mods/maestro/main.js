@@ -12,6 +12,7 @@ const MAX_TAIL = 8_000_000;
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
+const PROJECTIONS = [{ id: "worktrees", label: "Worktrees" }, { id: "subagents", label: "Sub-agents" }, { id: "workspace", label: "Workspace" }];
 const STATUS_WORD = { working: "Working", blocked: "Waiting on you", done: "Done", idle: "Idle", failed: "Failed" };
 const NERD = "JetBrainsMono Nerd Font Mono";
 const MONO = "JetBrainsMono Nerd Font Mono";
@@ -293,16 +294,25 @@ export default class Maestro extends View {
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
     this.refreshGit(list);
-    const byAddr = new Map(list.map((x) => [x.a.address, x]));
+    const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
+    const hide = shared("maestro.hideFinished") ?? {};
+    const every = new Map(list.map((x) => [x.a.address, x]));
+    // Hiding finished agents in a space hides its idle or done workers (agents with a live parent); failures stay.
+    const shown = list.filter((x) => !(hide[x.a.space] && x.a.parent && x.a.parent !== x.a.address && every.has(x.a.parent)
+      && (x.a.status === "idle" || x.a.status === "done") && !x.failed));
+    const byAddr = new Map(shown.map((x) => [x.a.address, x]));
+    const wt = (x) => this.gitOf(x.cwd)?.top ?? x.cwd ?? "?";
     const kidsOf = new Map();
-    for (const x of list) {
-      const p = x.a.parent;
-      if (p && byAddr.has(p) && p !== x.a.address) {
-        if (!kidsOf.has(p)) kidsOf.set(p, []);
-        kidsOf.get(p).push(x);
-      }
+    const nested = new Set();
+    for (const x of shown) {
+      const p = byAddr.get(x.a.parent);
+      if (!p || p === x || proj === "workspace" || (proj === "worktrees" && wt(p) !== wt(x))) continue;
+      if (!kidsOf.has(p.a.address)) kidsOf.set(p.a.address, []);
+      kidsOf.get(p.a.address).push(x);
+      nested.add(x.a.address);
     }
-    const roots = list.filter((x) => !(x.a.parent && byAddr.has(x.a.parent)));
+    const roots = shown.filter((x) => !nested.has(x.a.address));
+    const urgent = (p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.seq - q.a.seq;
     const order = [];
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
@@ -315,19 +325,26 @@ export default class Maestro extends View {
         for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
         continue;
       }
+      if (proj !== "worktrees") {
+        const group = [];
+        for (const x of mine.sort(urgent)) this.pushAgent(t, group, order, x, kidsOf, now, 0);
+        if (group.length) rows.push(this.guide(t, `g-${sp.id}`, 15, group));
+        continue;
+      }
       const trees = new Map();
       for (const x of mine) {
-        const g = this.gitOf(x.cwd);
-        const k = g?.top ?? x.cwd ?? "?";
-        if (!trees.has(k)) trees.set(k, { g, cwd: x.cwd, items: [] });
+        const k = wt(x);
+        if (!trees.has(k)) trees.set(k, { g: this.gitOf(x.cwd), cwd: x.cwd, items: [] });
         trees.get(k).items.push(x);
       }
       for (const [k, tr] of trees) {
         const fid = `wt:${sp.id}:${k}`;
+        const sorted = tr.items.sort(urgent);
+        const group = [];
+        if (this.folded.has(fid)) { group.push(this.iconCard(t, fid, this.flat(sorted, kidsOf))); for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address)); }
+        else for (const x of sorted) this.pushAgent(t, group, order, x, kidsOf, now, 0);
         rows.push(this.treeRow(t, fid, tr, kidsOf));
-        const sorted = tr.items.sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.seq - q.a.seq);
-        if (this.folded.has(fid)) { rows.push(this.iconCard(t, fid, this.flat(sorted, kidsOf))); for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address)); continue; }
-        for (const x of sorted) this.pushAgent(t, rows, order, x, kidsOf, now, 0);
+        rows.push(this.guide(t, `g-${fid}`, 9, group));
       }
     }
     setAgentOrder(order);
@@ -345,9 +362,44 @@ export default class Maestro extends View {
         .child(icon("m-new", "folder-plus", "New space", () => run("space.new")))
         .child(icon("m-finished", shared("maestro.showFinished") ? "circle-check" : "clock", shared("maestro.showFinished") ? "Showing finished tasks for 24 h" : "Finished tasks hide after 10 min", () => setShared("maestro.showFinished", !shared("maestro.showFinished"))))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
+      .when(!narrow, (el) => el.child(this.segments(t, proj)))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 6).pb(8).overflow_y_scrollbar().mode("always")
         .when(spaces().length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No spaces yet.")))
-        .children(rows));
+        .children(rows))
+      .when(!narrow, (el) => el.child(this.attentionStrip(t, list)));
+  }
+
+  // Projection switch: Worktrees | Sub-agents | Workspace, shared across views.
+  segments(t, proj) {
+    return h_flex().id("m-proj").mx(10).mb(6).p(2).h(28).flex_none().gap(2).rounded(7).bg(t.surface).border_1().border_color(t.border)
+      .children(PROJECTIONS.map((p) => div().id(`proj-${p.id}`).flex_1().h_full().flex().items_center().justify_center().rounded(5)
+        .text_size(12).font_medium().cursor_pointer()
+        .when(p.id === proj, (el) => el.bg(t.raised).text_color(t.foreground))
+        .when(p.id !== proj, (el) => el.text_color(t.dim).hover((st) => st.text_color(t.foreground)))
+        .on_click(() => setShared("maestro.projection", p.id))
+        .child(p.label)));
+  }
+
+  // Cards of one group hang off a vertical outline line.
+  guide(t, id, ml, rows) {
+    return v_flex().id(id).ml(ml).flex_none().border_l(1).border_color(t.border).children(rows);
+  }
+
+  // Agents waiting on the human, pinned under the list; click focuses.
+  attentionStrip(t, list) {
+    const waiting = list.filter((x) => x.a.status === "blocked").map((x) => ({ x, why: x.kind ?? (x.s ? attention(x.s) : null) }));
+    if (!waiting.length) return div();
+    const title = waiting.every((w) => w.why === "question") ? "Quick question" : "Waiting on you";
+    return v_flex().id("m-attn").flex_none().max_h(180).overflow_y_scrollbar().px(8).pt(6).pb(6).gap(2).border_t(1).border_color(t.border)
+      .child(h_flex().px(4).pb(2).gap(6).items_center()
+        .child(div().size(7).rounded(4).bg(t.blocked))
+        .child(div().text_size(12).font_semibold().text_color(t.blocked).child(title))
+        .child(div().text_size(11).text_color(t.dim).child(String(waiting.length))))
+      .children(waiting.map(({ x, why }) => h_flex().id(`attn-${x.a.address}`).px(4).py(3).gap(8).items_center().rounded(6)
+        .hover((st) => st.bg(t.hover)).on_click(() => this.focus(x)).tooltip(this.task(x) || this.title(x))
+        .child(this.icon(t, x, 15))
+        .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_medium().child(this.title(x)))
+        .child(div().flex_none().px(5).rounded(4).text_size(10.5).bg(t.blocked + "26").text_color(t.blocked).child(why ?? "input"))));
   }
 
   walk(x, kidsOf, fn) { fn(x); for (const k of kidsOf.get(x.a.address) ?? []) this.walk(k, kidsOf, fn); }
@@ -386,23 +438,31 @@ export default class Maestro extends View {
     const worst = all.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
     const color = (shared("space.colors") ?? {})[sp.id] ?? "ansi6";
     const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color] ?? t.accent);
-    return h_flex().id(`space-${sp.id}`).mt(6).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
+    const hidden = Boolean((shared("maestro.hideFinished") ?? {})[sp.id]);
+    const stop = (_e, cx) => cx.stop_propagation();
+    const btn = (id, tip, on, child) => div().id(`${id}-${sp.id}`).size(22).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
+    const menu = () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } });
+    return v_flex().mt(6).flex_none().child(h_flex().id(`space-${sp.id}`).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
       .when(sp.active, (el) => el.bg(t.selected)).hover((st) => st.bg(sp.active ? t.selected : t.hover))
       .on_click(() => run("space.select", { id: sp.id }))
-      .on_mouse_down("right", () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } }))
+      .on_mouse_down("right", menu)
       .child(div().id(`spf-${sp.id}`).size(18).flex_none().flex().items_center().justify_center().rounded(4).border_1().border_color(t.border).text_color(t.dim)
-        .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); this.fold(fid, cx); })
         .child(svg(`mods/workspace-chrome/${open ? "minus" : "plus"}.svg`).size(11)))
-      .child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?"))
-      .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(sp.name))
+      .child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?"))
+      .child(div().flex_1().min_w(0).truncate().text_size(15).font_bold().child(sp.name))
       .when(!open && worst !== "idle", (el) => el.child(this.statusDot(t, worst)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
-      .child(div().id(`spn-${sp.id}`).size(22).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
-        .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip("New Copilot here")
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }); })
-        .child(svg("mods/workspace-chrome/plus.svg").size(13)));
+      .child(btn("sph", hidden ? "Show finished agents" : "Hide finished agents", () => setShared("maestro.hideFinished", { ...(shared("maestro.hideFinished") ?? {}), [sp.id]: !hidden }),
+        svg("mods/maestro/eye-off.svg").size(13).when(hidden, (el) => el.text_color(t.accent))))
+      .child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗")))
+      .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
+      .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
+        svg("mods/workspace-chrome/plus.svg").size(13))))
+      .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
   }
 
   railSpace(t, sp, mine) {
