@@ -9,6 +9,7 @@ import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
+import { nestSpaces, spacePlace } from "./wtlib.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
@@ -336,7 +337,7 @@ export default class Maestro extends View {
     if (this.view !== "footer") this.watchBlocked(list);
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
-    this.refreshGit(list);
+    this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()) }))]);
     const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
     const hide = shared("maestro.hideFinished") ?? {};
     const every = new Map(list.map((x) => [x.a.address, x]));
@@ -359,10 +360,10 @@ export default class Maestro extends View {
     const order = [];
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
-    for (const sp of spaces()) {
+    for (const { sp, tree } of this.nestedSpaces()) {
       const mine = roots.filter((x) => x.a.space === sp.id);
       if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.railSpace(t, sp, mine)); continue; }
-      rows.push(this.spaceRow(t, sp, mine, kidsOf));
+      rows.push(this.spaceRow(t, sp, mine, kidsOf, tree));
       if (this.folded.has(`sp:${sp.id}`)) {
         if (mine.length) rows.push(this.iconCard(t, `sp:${sp.id}`, this.flat(mine, kidsOf)));
         for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
@@ -464,7 +465,7 @@ export default class Maestro extends View {
           if (r.code === 0) {
             const [common, top, branch] = r.stdout.trim().split("\n");
             const main = common.replace(/\/\.git\/?$/, "");
-            v = { repo: main.split("/").pop(), top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
+            v = { repo: main.split("/").pop(), main, top, branch, linked: main !== top, tree: main !== top ? top.split("/").pop() : null };
           }
         } catch {}
         this.git.set(c, { v, at: Date.now() });
@@ -474,7 +475,13 @@ export default class Maestro extends View {
     });
   }
 
-  spaceRow(t, sp, mine, kidsOf) {
+  // Spaces in Herdr's order, worktree spaces under their repo's main-checkout space (as Herdr's spaces list).
+  nestedSpaces() {
+    const ps = panes();
+    return nestSpaces(spaces().map((sp) => ({ id: sp.id, sp, g: this.gitOf(spacePlace(sp, ps)) })));
+  }
+
+  spaceRow(t, sp, mine, kidsOf, tree = null) {
     const fid = `sp:${sp.id}`;
     const open = !this.folded.has(fid);
     const all = this.flat(mine, kidsOf);
@@ -487,7 +494,8 @@ export default class Maestro extends View {
       .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
     const menu = () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } });
-    return v_flex().mt(6).flex_none().child(h_flex().id(`space-${sp.id}`).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
+    const g = this.gitOf(spacePlace(sp, panes()));
+    return v_flex().mt(tree ? 2 : 6).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(h_flex().id(`space-${sp.id}`).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
       .when(sp.active, (el) => el.bg(t.selected)).hover((st) => st.bg(sp.active ? t.selected : t.hover))
       .on_click(() => run("space.select", { id: sp.id }))
       .on_mouse_down("right", menu)
@@ -495,17 +503,57 @@ export default class Maestro extends View {
         .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); this.fold(fid, cx); })
         .child(svg(`mods/workspace-chrome/${open ? "minus" : "plus"}.svg`).size(11)))
-      .child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?"))
-      .child(div().flex_1().min_w(0).truncate().text_size(15).font_bold().child(sp.name))
+      .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
+      .when(!tree, (el) => el.child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?")))
+      .child(div().flex_1().min_w(0).truncate().text_size(tree ? 14 : 15).font_bold().child(sp.name))
       .when(!open && worst !== "idle", (el) => el.child(this.statusDot(t, worst)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
       .child(btn("sph", hidden ? "Show finished agents" : "Hide finished agents", () => setShared("maestro.hideFinished", { ...(shared("maestro.hideFinished") ?? {}), [sp.id]: !hidden }),
         svg("mods/maestro/eye-off.svg").size(13).when(hidden, (el) => el.text_color(t.accent))))
       .child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗")))
+      .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
+        .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
       .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
         svg("mods/workspace-chrome/plus.svg").size(13))))
+      .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
+  }
+
+  // The space's worktree actions, as Herdr's space menu: each opens Herdr's worktree dialog.
+  toggleWorktreeMenu(sp, g) {
+    if (this.wtMenu?.id === sp.id) { this.wtMenu = null; this.cx?.notify(); return; }
+    const m = { id: sp.id, dirty: null };
+    this.wtMenu = m;
+    const at = spacePlace(sp, panes());
+    if (g.linked && at) this.cx?.spawn(async (cx) => {
+      try { const r = await exec("git", ["-C", at, "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"]); m.dirty = r.code === 0 ? r.stdout.trim() !== "" : true; } catch { m.dirty = true; }
+      cx.notify();
+    });
+    this.cx?.notify();
+  }
+
+  openWorktree(sp, action) {
+    this.wtMenu = null;
+    openOverlay({ mod: "worktree", kind: "dialog", ...(action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }),
+      props: { space: sp.id, folder: spacePlace(sp, panes()) ?? undefined, action } });
+  }
+
+  // Remove only a linked checkout that is clean and has no agent in its space.
+  worktreeMenu(t, sp, g) {
+    const m = this.wtMenu;
+    const agents = this.sessions().filter((x) => x.a.space === sp.id).length;
+    const why = !g.linked ? null : agents ? `${agents} agent${agents > 1 ? "s" : ""} still in it` : m.dirty == null ? "checking…" : m.dirty ? "uncommitted changes" : null;
+    const item = (id, label, on, off) => h_flex().id(`spw-${id}-${sp.id}`).px(8).h(26).gap(8).items_center().rounded(6).text_size(12.5)
+      .when(!off, (el) => el.cursor_pointer().text_color(t.foreground).hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); on(); }))
+      .when(Boolean(off), (el) => el.text_color(t.dim).tooltip(`Can't remove: ${off}`))
+      .child(svg("mods/workspace-chrome/git-branch.svg").size(12).flex_none().text_color(t.dim))
+      .child(div().flex_1().child(label))
+      .when(Boolean(off), (el) => el.child(div().text_size(11).text_color(t.dim).child(off)));
+    return v_flex().id(`spw-menu-${sp.id}`).mx(6).mt(2).p(3).flex_none().rounded(7).border_1().border_color(t.border).bg(t.surface)
+      .child(item("new", "New worktree", () => this.openWorktree(sp, "new")))
+      .child(item("open", "Open worktree", () => this.openWorktree(sp, "open")))
+      .when(g.linked, (el) => el.child(item("rm", "Remove worktree", () => this.openWorktree(sp, "remove"), why)));
   }
 
   railSpace(t, sp, mine) {

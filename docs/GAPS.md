@@ -66,6 +66,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** the card's trigger reads on `on_hover` (pointer entry), at most every 3 s per terminal; the 400 ms open delay hides the read.
 **Closes with:** `on_open_change` firing for hover cards.
 
+### G-13 - Herdr worktrees cannot be made from a script
+
+**Wanted:** `maestro spawn --worktree <b> --herdr-space` handing the checkout to Herdr's own worktree mod.
+**Blocked by:** the mod's create path runs only inside its dialog (`openOverlay({mod: "worktree", props: {branch, tab?, argv?}})`), and mods alone can open overlays; `herdr-app commands` has no worktree command, and `mod.open` takes only `name` (no props).
+**Shipped:** the CLI follows the mod's convention itself: `git worktree add [-b <b>] ~/.herdr/worktrees/<repo>/<slug> [HEAD]`, then `herdr-app do space.new {folder, argv, tab}` with no name so Herdr's spaces list nests it under the repo's space. Maestro's sidebar opens the real dialogs (New / Open / Remove worktree). If Herdr moves its root (a constant in `mods/worktree/main.js`), `mods/maestro/wtlib.js` must follow.
+**Closes with:** a `worktree.new {space | folder, branch, argv?}` command, or overlay props for `mod.open`.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

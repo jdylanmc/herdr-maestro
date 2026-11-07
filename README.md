@@ -31,7 +31,9 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 
 **Hierarchy** (replaces Herdr's separate spaces and agents lists in the Maestro layout)
 - **Space** → **worktree/repo** → **agent card** → its **internal tasks** (Copilot subagents) and
-  **workers** (`maestro spawn` / `hc run`), indented like an outline. Folding a space or worktree
+  **workers** (`maestro spawn` / `hc run`), indented like an outline. As in Herdr's spaces list,
+  a worktree space sits under its repo's space with a branch icon; a space's branch button offers
+  New / Open / Remove worktree (Herdr's dialogs; Remove only when clean with no agent in it). Folding a space or worktree
   leaves an icon card of its agents.
 - Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
   its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
@@ -87,7 +89,7 @@ Copilot agents learn these from the bundled `herdr-maestro` skill.
 ```text
 maestro whoami | peers [--all]
 maestro send <t> <message>
-maestro spawn [--name n] [--cwd d] [--worktree <branch>] [--task text | -- argv...]
+maestro spawn [--name n] [--cwd d] [--worktree <branch> [--herdr-space|--sibling]] [--task text | -- argv...]
 maestro close <t>                       # only workers this agent (or its workers) launched
 maestro worktree ls | rm <path|branch> [--force]
 maestro notify <title> [body]           # Herdr toast that focuses the agent when clicked
@@ -101,7 +103,10 @@ maestro readiness                       # why this session is or is not fully vi
 ```
 
 Workers are always visible interactive tabs. Worktrees are sibling checkouts
-`<repo>-<branch>`; `rm` refuses while the worker runs or the tree is dirty.
+`<repo>-<branch>` by default; `--herdr-space` (or `MAESTRO_WORKTREE=herdr`, or
+`shared("maestro.worktreeKind") = "herdr"`) makes one the way Herdr's worktree mod does,
+`~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's. `worktree ls` shows
+each one's kind; `rm` refuses while its worker or any live terminal is in it, or the tree is dirty.
 
 ## How it works
 
