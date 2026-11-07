@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path, { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { herdrSlug, herdrPath, siblingPath, repoOf, chooseKind, kindOf, removalBlocker, spacePlace, nestSpaces } from "../mods/maestro/wtlib.js";
+import { insideWorktree, worktreeUsers } from "../bin/worktreelib.js";
 
 test("Herdr worktree paths follow its mod: ~/.herdr/worktrees/<repo>/<slug>", () => {
   assert.equal(herdrSlug("feat/x y"), "feat-x-y");
@@ -62,7 +65,7 @@ test("CLI removal canonicalizes symlinks without changing stored paths or bypass
   let removed;
   let saved;
   const cli = runInNewContext(`({${method}})`, {
-    existsSync, realpathSync, wt: { removalBlocker, kindOf },
+    existsSync, realpathSync, worktreeUsers, wt: { removalBlocker, kindOf },
     worktrees: () => ({ [path]: { repo: root, branch: "feat", kind: "sibling" } }),
     json: () => ({ terminals: live }),
     git: (cwd, args) => args[0] === "status" ? dirty : (removed = args.at(-1)),
@@ -71,7 +74,7 @@ test("CLI removal canonicalizes symlinks without changing stored paths or bypass
     WORKTREES: "unused", out: () => {},
   });
   for (const cwd of [realpathSync(join(physical, "src")), join(path, "src")]) {
-    live = [{ address: "other", cwd }];
+    live = [{ address: "other", state: "live", cwd }];
     for (const flags of [[], ["--force"]]) {
       assert.throws(() => cli.worktree(["rm", path, ...flags]), /live terminal other/);
       assert.equal(removed, undefined);
@@ -149,4 +152,71 @@ test("worktree spaces nest under their repo's main space, in order", () => {
   assert.deepEqual(nestSpaces(rows).map((r) => [r.id, r.tree]), [["other", null], ["m", null], ["w1", "├─"], ["w2", "└─"], ["orphan", null]]);
   const twice = nestSpaces([{ id: "m1", g: main }, { id: "m2", g: main }, { id: "w", g: wt }]);
   assert.deepEqual(twice.map((r) => [r.id, r.tree]), [["m1", null], ["w", "└─"], ["m2", null]]);
+});
+
+test("containment respects path boundaries on Unix and Windows", () => {
+  for (const [paths, root] of [[path.posix, "/repo-review"], [path.win32, "C:\\repo-review"]]) {
+    assert.equal(insideWorktree(root, root, paths), true);
+    assert.equal(insideWorktree(paths.join(root, "src"), root, paths), true);
+    assert.equal(insideWorktree(`${root}-other`, root, paths), false);
+    assert.equal(insideWorktree(paths.dirname(root), root, paths), false);
+    assert.equal(insideWorktree("src", root, paths), false);
+    assert.equal(insideWorktree(null, root, paths), false);
+  }
+  assert.equal(insideWorktree("c:\\REPO-review\\src", "C:\\repo-review", path.win32), true);
+  assert.equal(insideWorktree("D:\\repo-review", "C:\\repo-review", path.win32), false);
+});
+
+test("only live users count, including symlinked and deleted subdirectories", (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "maestro-worktrees-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = path.join(dir, "review");
+  const alias = path.join(dir, "alias");
+  mkdirSync(root);
+  symlinkSync(root, alias, process.platform === "win32" ? "junction" : "dir");
+  const users = worktreeUsers([
+    { address: "t3", state: "live", cwd: path.join(alias, "deleted") },
+    { address: "t4", state: "exited", cwd: root },
+    { address: "t5", state: "live", cwd: `${root}-other` },
+    { address: "t6", state: "live", cwd: null },
+  ], root);
+  assert.deepEqual(users.map((u) => u.address), ["t3"]);
+});
+
+test("worktree rm refuses unrecorded live users even with --force", { skip: process.platform === "win32" }, (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "maestro-worktrees-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const repo = path.join(dir, "repo"), root = path.join(dir, "review");
+  const git = (...args) => execFileSync("git", args, { stdio: "pipe" });
+  git("init", "-q", repo);
+  git("-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Initial");
+  git("-C", repo, "worktree", "add", "-b", "review", root);
+  writeFileSync(path.join(root, "unfinished.txt"), "keep this work");
+  mkdirSync(path.join(root, "src"));
+  const home = path.join(dir, "app");
+  const data = path.join(home, "data", "maestro");
+  mkdirSync(data, { recursive: true });
+  const registry = path.join(data, "worktrees.json");
+  const recorded = JSON.stringify({ [root]: { repo, branch: "review", terminal: "t2" } });
+  writeFileSync(registry, recorded);
+  const tools = path.join(dir, "bin");
+  mkdirSync(tools);
+  writeFileSync(path.join(tools, "hc"), '#!/usr/bin/env node\nprocess.stdout.write(process.env.TEST_TERMINALS);\n', { mode: 0o755 });
+  const cli = fileURLToPath(new URL("../bin/maestro", import.meta.url));
+  const remove = (cwd, force, state = "live") => spawnSync(process.execPath, [cli, "worktree", "rm", "review", ...(force ? ["--force"] : [])], {
+    encoding: "utf8",
+    env: { ...process.env, HERDR_APP_HOME: home, PATH: `${tools}${path.delimiter}${process.env.PATH}`,
+      TEST_TERMINALS: JSON.stringify({ terminals: [{ address: "t3", state, cwd }] }) },
+  });
+  for (const cwd of [root, path.join(root, "src")]) for (const force of [false, true]) {
+    const result = remove(cwd, force);
+    assert.equal(result.status, 3, result.stderr);
+    assert.match(result.stderr, /live terminal t3/);
+    assert.equal(readFileSync(registry, "utf8"), recorded);
+    assert.equal(readFileSync(path.join(root, "unfinished.txt"), "utf8"), "keep this work");
+  }
+  const removed = remove(`${root}-other`, true);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(existsSync(root), false);
+  assert.deepEqual(JSON.parse(readFileSync(registry, "utf8")), {});
 });

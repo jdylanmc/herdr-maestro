@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
+import { worktreeUsers } from "./worktreelib.js";
 
 const MOD = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "mods", "maestro");
 const HELPER = join(MOD, "helper.mjs");
@@ -386,7 +387,7 @@ const commands = {
   // clean and no live terminal (its worker or any other) is in it.
   worktree([op, target, ...flags]) {
     const all = worktrees();
-    const liveTerms = () => json("hc", ["ls", "--json"]).terminals?.map((t) => ({ address: t.address, cwd: t.cwd })) ?? [];
+    const liveTerms = () => (json("hc", ["ls", "--json"]).terminals ?? []).filter((t) => t.state === "live");
     if (!op || op === "ls") {
       const live = new Set(liveTerms().map((t) => t.address));
       out(Object.entries(all).map(([path, w]) => ({ path, branch: w.branch, kind: wt.kindOf(w), owner: w.owner, terminal: w.terminal ?? null, live: w.terminal ? live.has(w.terminal) : false, ...(w.space ? { space: w.space } : {}) })));
@@ -398,12 +399,16 @@ const commands = {
     const [path, w] = entry;
     const force = flags.includes("--force");
     const there = existsSync(path);
+    const live = liveTerms();
+    if (w.terminal && live.some((t) => t.address === w.terminal)) fail(`denied: its worker ${w.terminal} is still running`, 3);
+    const users = worktreeUsers(live, path);
+    if (users.length) fail(`denied: live terminal ${users[0].address} is in it`, 3);
     const real = (p) => {
       try { return realpathSync(p); }
       catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return p; throw e; }
     };
     const blocker = wt.removalBlocker({ path: real(path), displayPath: path, entry: w,
-      live: liveTerms().map((t) => ({ ...t, cwd: t.cwd && real(t.cwd) })),
+      live: live.map((t) => ({ ...t, cwd: t.cwd && real(t.cwd) })),
       dirty: there && Boolean(git(path, ["status", "--porcelain"])), force });
     if (blocker) fail(`denied: ${blocker}`, 3);
     if (wt.kindOf(w) === "herdr" && w.space) {
