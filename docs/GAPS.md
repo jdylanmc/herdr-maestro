@@ -102,6 +102,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Evidence:** a temporary loopback machine (`hc machine add --via 'sh -c' --temp --session <scratch>`): `hc exec --on` ran the probe and `helper.mjs procs`/`locks`; `hc get <machine>/t1 --json` returned `foreground.pid`. Not measured: real ssh latency, Windows remotes, the sidebar with a real remote space (temporary machines get no spaces).
 **Closes with:** `watchFolder`/`readdir` with `{ on }`, or a mod-shipped helper Herdr installs on each machine.
 
+### G-17 - No CLI route to Herdr's known agents
+
+**Wanted:** `maestro spawn --agent <name>` resolving names against the same agent table as Herdr's menus.
+**Blocked by:** `knownAgents()` is mod-only; `herdr-app --help`, `herdr-app commands` and `hc --help` list no agent or program table (`hc templates` is empty), and the built-in 120-program table is not on disk (`programs.json` holds only overrides).
+**Shipped:** the Maestro mod and its launch menu cache `knownAgents()` (key, name, run, installed) in `shared("maestro.knownAgents")`; the CLI reads it from `shared.json`, else a fallback table (`copilot`, `claude`, `codex`, `cursor-agent`, `gemini`, `opencode`, `pi`, `amp`) and errors with the known names.
+**Closes with:** `herdr-app agents --json` (or `knownAgents` over `herdr-app do`).
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

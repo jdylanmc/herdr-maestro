@@ -15,6 +15,7 @@ const MOD = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "..", "m
 const HELPER = join(MOD, "helper.mjs");
 const pets = await import(pathToFileURL(join(MOD, "petlib.js")).href);
 const wt = await import(pathToFileURL(join(MOD, "wtlib.js")).href);
+const agentlib = await import(pathToFileURL(join(MOD, "agentlib.js")).href);
 
 const HOME = process.env.HERDR_APP_HOME ?? join(homedir(), ".config", "herdr-app");
 const DATA = join(HOME, "data", "maestro");
@@ -23,7 +24,7 @@ const NOTIFY = join(DATA, "notify");
 const ME = process.env.HC_TERMINAL_ID ?? null;
 const ICON_PRESETS = ["robot", "code", "bug", "eye", "shield", "compass", "brush", "flask", "rocket", "cogs", "search", "book", "terminal", "wrench", "lightbulb", "heart", "star", "bolt"];
 const MOODS = ["happy", "focused", "thinking", "proud", "confused", "stuck", "sleepy", "celebrating"];
-const DEFAULT_ARGV = ["copilot", "--yolo"];
+const DEFAULT_ARGV = agentlib.DEFAULT_ARGV;
 const WORKTREES = join(DATA, "worktrees.json");
 const PETS = join(DATA, "pets");
 const CHOICES = join(PETS, "choices.json");
@@ -168,9 +169,9 @@ function spawnBg(me, opt, argv) {
   const labels = [`maestro.parent=${me}`, ...(opt.name ? [`maestro.name=${opt.name}`] : [])].flatMap((l) => ["--label", l]);
   const made = json("hc", ["run", "--bg", "--json", ...(hcName ? ["--name", hcName] : []), "--cwd", opt.cwd, ...labels, "--", ...argv]);
   if (!made.address) fail("hc run returned no terminal");
-  saveRecord(made.address, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null, background: true });
+  saveRecord(made.address, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null, background: true, ...(opt.agent ? { agent: opt.agent } : {}) });
   if (opt.worktree) writeJson(WORKTREES, { ...worktrees(), [opt.cwd]: { ...worktrees()[opt.cwd], terminal: made.address } });
-  out({ address: made.address, parent: me, background: true, ...(opt.worktree ? { worktree: opt.cwd } : {}) });
+  out({ address: made.address, parent: me, background: true, ...(opt.agent ? { agent: opt.agent } : {}), ...(opt.worktree ? { worktree: opt.cwd } : {}) });
 }
 
 const commands = {
@@ -213,25 +214,38 @@ const commands = {
       else if (a === "--worktree") opt.worktree = args[++i];
       else if (a === "--herdr-space" || a === "--sibling") opt.kindFlag = a;
       else if (a === "--bg") opt.bg = true;
+      else if (a === "--agent") opt.agent = args[++i];
       else if (a === "--") { opt.argv = args.slice(i + 1); break; }
       else if (!opt.task) opt.task = a;
     }
+    let agent = null;
+    if (opt.agent) {
+      if (opt.argv?.length) fail("use either --agent <name> or -- argv, not both");
+      let sharedJson = null;
+      try { sharedJson = JSON.parse(readFileSync(join(HOME, "shared.json"), "utf8")); } catch {}
+      const { agents, cached } = agentlib.knownAgentsFrom(sharedJson);
+      agent = agentlib.findAgent(opt.agent, agents);
+      if (!agent) fail(`unknown agent ${opt.agent}; known: ${agents.map((x) => x.key).join(", ")}${cached ? "" : " (Maestro has not read Herdr's agent list yet; open the Maestro layout once)"}, or pass -- argv`);
+      if (agent.installed === false) fail(`${agent.name ?? agent.key} is not installed on this machine (Herdr's agent list)`);
+    }
+    const plan = opt.argv?.length ? { argv: opt.argv, task: null } : agentlib.spawnPlan({ agent, task: opt.task, copilotArgv: DEFAULT_ARGV });
+    if (opt.bg && plan.task) fail("background tasks for this agent need explicit argv; omit --bg to send the task through Herdr, or use -- argv");
     const kind = opt.worktree ? wt.chooseKind(opt.kindFlag ? [opt.kindFlag] : [], process.env, sharedConfig()) : null;
     if (opt.worktree) opt.cwd = makeWorktree(opt.cwd, opt.worktree, me, kind);
     const self = world().find((t) => t.address === me);
-    const argv = ["node", HELPER, "run", ...(opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])])];
-    if (opt.bg) return spawnBg(me, opt, argv);
-    // A Herdr worktree gets its own unnamed space (named after its folder, nested under the repo's);
-    // everything else opens as a tab in this agent's space.
+    const argv = ["node", HELPER, "run", ...plan.argv];
+    if (opt.bg) return spawnBg(me, { ...opt, ...(agent ? { agent: agent.key } : {}) }, argv);
+    const launch = { folder: opt.cwd, argv, ...(plan.task ? { task: plan.task } : {}) };
+    // Herdr worktrees get their own space; sibling checkouts stay in the parent's space.
     const [verb, req] = kind === "herdr"
-      ? ["space.new", { folder: opt.cwd, argv, ...(opt.name ? { tab: opt.name } : {}) }]
-      : ["tab.new", { ...(self?.space ? { space: self.space } : {}), folder: opt.cwd, argv, ...(opt.name ? { name: opt.name } : {}) }];
+      ? ["space.new", { ...launch, ...(opt.name ? { tab: opt.name } : {}) }]
+      : ["tab.new", { ...launch, ...(self?.space ? { space: self.space } : {}), ...(opt.name ? { name: opt.name } : {}) }];
     const made = JSON.parse(run("herdr-app", ["do", verb, JSON.stringify(req)]));
     if (made.error || !made.terminal) fail(`${verb} failed: ${made.error ?? "no terminal"}`);
     try { run("hc", ["label", made.terminal, `maestro.parent=${me}`, ...(opt.name ? [`maestro.name=${opt.name}`] : [])]); } catch {}
-    saveRecord(made.terminal, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null });
+    saveRecord(made.terminal, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null, ...(agent ? { agent: agent.key } : {}) });
     if (opt.worktree) writeJson(WORKTREES, { ...worktrees(), [opt.cwd]: { ...worktrees()[opt.cwd], terminal: made.terminal, ...(kind === "herdr" ? { space: made.space } : {}) } });
-    out({ address: made.terminal, tab: made.tab, space: made.space, parent: me, ...(opt.worktree ? { worktree: opt.cwd, kind } : {}) });
+    out({ address: made.terminal, tab: made.tab, space: made.space, parent: me, ...(agent ? { agent: agent.key } : {}), ...(opt.worktree ? { worktree: opt.cwd, kind } : {}) });
   },
 
   close([target]) {
@@ -501,8 +515,8 @@ const commands = {
   maestro whoami                       this terminal, its space, parent, tags, mood
   maestro peers [--all]                agents in this space (or everywhere)
   maestro send <t> <message>           message another agent (fire and forget)
-  maestro spawn [--name n] [--cwd d] [--task text | -- argv...]
-                                       open a visible Copilot worker in a new tab of this space
+  maestro spawn [--name n] [--cwd d] [--agent a] [--task text | -- argv...]
+                                       open a visible worker (Copilot unless --agent claude, codex, …) in a new tab of this space
                  [--worktree <branch>]  … in a new sibling worktree <repo>-<branch>
                  [--herdr-space|--sibling]  … or Herdr's: ~/.herdr/worktrees/<repo>/<branch> in its own
                                        space nested under the repo's (default: MAESTRO_WORKTREE or

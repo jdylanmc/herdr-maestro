@@ -15,7 +15,7 @@ export function liveAgents(agents, terminals, records) {
     const { parent, name } = lineage(k.address);
     if (!(k.report?.app ?? k.agent) || !parent) continue;
     const status = k.status === "error" ? "blocked" : ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : "idle";
-    const a = { address: k.address, pane: null, space: null, app: k.report?.app ?? k.agent, space_name: "", tab_name: k.name ?? k.address, status, title: k.title || k.name || k.address, handle: name ?? k.name ?? null, seq: 0, focused: false, parent, cwd: k.cwd };
+    const a = { address: k.address, pane: null, space: null, app: k.report?.app ?? k.agent, program: k.program ?? null, space_name: "", tab_name: k.name ?? k.address, status, title: k.title || k.name || k.address, handle: name ?? k.name ?? null, seq: 0, focused: false, parent, cwd: k.cwd };
     shown.push(a);
     byAddr.set(a.address, a);
   }

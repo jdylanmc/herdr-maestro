@@ -15,7 +15,7 @@ everything in the Maestro layout (`cmd-shift-m`).
 | `maestro whoami` | This terminal: address, space, parent, tags, mood. |
 | `maestro peers [--all]` | Agents in this space (or all spaces) with status. |
 | `maestro send <t> <message>` | Fire-and-forget message; arrives as a prompt prefixed `[maestro from tN …]`. |
-| `maestro spawn --name <n> --task "<scope>" [--cwd <dir>]` | Visible interactive Copilot worker in a new tab of this space. Prints its address. |
+| `maestro spawn --name <n> --task "<scope>" [--cwd <dir>] [--agent <name>]` | Visible interactive worker in a new tab of this space: Copilot by default, or any agent Herdr knows (`--agent claude`, `codex`, `cursor-agent`, `gemini`, …; the error lists them). Prints its address. |
 | `maestro spawn --worktree <branch> [--herdr-space\|--sibling] …` | Worker on its own checkout: sibling `<repo>-<branch>` by default, or with `--herdr-space` Herdr's `~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's. With `--bg`, stays pane-less in its parent's space. |
 | `maestro worktree ls \| rm <path\|branch> [--force]` | Worktrees you made, with `kind`. `rm` refuses while any live terminal is in it or it is dirty (`--force` only discards changes, never a live terminal); the branch is kept. |
 | `maestro spawn --bg --name <n> --task "<scope>"` | Same worker without a pane: a sub-agent under this one (Herdr and Maestro show it; the human can peek or keep it). Use for fan-out. |
