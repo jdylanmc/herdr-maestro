@@ -4,9 +4,10 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
+import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
+import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
@@ -24,12 +25,6 @@ const IDENTITY = ["#22a99a", "#e3814f", "#5b8def", "#8b7cf6", "#3fae6a", "#d9649
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619); return h >>> 0; };
 const find = (node, id) => { if (node?.id === id) return node; for (const c of node?.children ?? []) { const f = find(c, id); if (f) return f; } return null; };
-// Pet mood rows, as in pets.mjs: [20-row mood atlas, 9-row Codex sheet].
-const MOOD_ROWS = {
-  idle: [0, 0], thinking: [11, 8], working: [7, 7], delegating: [12, 1], question: [6, 6],
-  "needs-permission": [13, 6], confused: [14, 8], content: [3, 3], startled: [9, 4], sad: [5, 5],
-  compacting: [15, 2], sleepy: [16, 0], gone: [17, 0], proud: [18, 3], celebrating: [19, 4],
-};
 // `maestro mood` words to pet moods.
 const SELF_MOOD = { happy: "proud", focused: "working", thinking: "thinking", proud: "proud", confused: "confused", stuck: "confused", sleepy: "sleepy", celebrating: "celebrating" };
 
@@ -37,6 +32,8 @@ const dataDir = () => `${appHome()}/data/maestro`;
 const snapDir = () => `${dataDir()}/terminals`;
 const agentDir = () => `${dataDir()}/agents`;
 const notifyDir = () => `${dataDir()}/notify`;
+const petDir = () => `${dataDir()}/pets`;
+const choicesPath = () => `${petDir()}/choices.json`;
 const MOOD = { happy: "😊", focused: "🎯", thinking: "🤔", proud: "😎", confused: "😕", stuck: "🧱", sleepy: "😴", celebrating: "🎉" };
 const BOARD = [
   { id: "blocked", label: "Waiting on you" },
@@ -88,13 +85,15 @@ export default class Maestro extends View {
     this.folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
     this.pets = [];             // rendered pets (data/maestro/pets/index.json)
+    this.choices = null;        // data/maestro/pets/choices.json, once read
     cx.spawn(async (cx) => { await this.loadPets(); cx.notify(); });
     cx.spawn(async (cx) => {
       for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
       await this.refresh();
       cx.notify();
       for (;;) {
-        await watchFolder(dataDir());
+        const changed = await watchFolder(dataDir());
+        if (changed.some((p) => p === dataDir() || p.startsWith(petDir()))) await this.readPets();
         await this.refresh();
         cx.notify();
       }
@@ -104,6 +103,7 @@ export default class Maestro extends View {
         const c = await nextCommand();
         if (c === "board") this.openBoard();
         else if (c === "tags") this.openTags();
+        else if (c === "pets") this.openPets();
         cx.notify();
       }
     });
@@ -111,13 +111,46 @@ export default class Maestro extends View {
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
   }
 
-  // Codex pets (~/.codex/pets) and cmux Maestro's own, rendered once to per-mood GIFs.
+  // Codex pets (~/.codex/pets), cmux Maestro's own and added ones (data/maestro/pet-sources),
+  // rendered to per-mood GIFs by a detached helper; the last index.json shows meanwhile.
   async loadPets() {
-    const out = `${dataDir()}/pets`;
-    const roots = [`${home()}/.codex/pets`, `${home()}/Applications/CMUX Maestro Preview.app/Contents/Extensions/CMUX Maestro Preview Extension.appex/Contents/Resources/maestro-pet.json`, `${dataDir()}/pet-sources`];
-    try { this.pets = JSON.parse(await readTextFile(`${out}/index.json`)); } catch {}
+    await this.readPets();
     if (!this.primary) return;
-    try { const r = await helper("pets", out, ...roots); if (r.code === 0) this.pets = JSON.parse(r.stdout); } catch {}
+    try { await helper("pets", "--bg", petDir(), ...petRoots(home(), dataDir())); } catch {}
+  }
+
+  async readPets() {
+    try { const v = JSON.parse(await readTextFile(`${petDir()}/index.json`)); if (Array.isArray(v)) this.pets = v; } catch {}
+    await this.loadChoices();
+  }
+
+  // choices.json is the durable record (agents write it with `maestro pet use`); shared()
+  // is the live cache every copy and the footer read. File entries win when they change.
+  async loadChoices() {
+    let text = null;
+    try { text = await readTextFile(choicesPath()); } catch {}
+    const previous = this.choices;
+    this.choices = parseChoices(text);
+    const cache = { default: shared("maestro.pet") ?? null, sessions: shared("maestro.pets") ?? {} };
+    const next = mergeChoices(cache, this.choices, previous);
+    if (JSON.stringify(next.sessions) !== JSON.stringify(parseChoices(cache).sessions)) setShared("maestro.pets", next.sessions);
+    if (next.default && next.default !== cache.default) setShared("maestro.pet", next.default);
+  }
+
+  // Records one choice (key null: the default) in choices.json and the live cache.
+  async saveChoice(key, id) {
+    if (key == null) setShared("maestro.pet", id);
+    else { const s = { ...(shared("maestro.pets") ?? {}) }; if (id == null) delete s[key]; else s[key] = id; setShared("maestro.pets", s); }
+    for (let i = 0; i < 3; i++) {
+      let before = null;
+      try { before = await readTextFile(choicesPath()); } catch {}
+      const next = setChoice(parseChoices(before), key, id);
+      try { await fs.mkdir(petDir(), { recursive: true }); await writeTextFile(choicesPath(), JSON.stringify(next, null, 1), before); this.choices = next; return; } catch {}
+    }
+  }
+
+  openPets() {
+    openOverlay({ kind: "window", mod: "maestro-pets", key: "maestro-pets", width: 980, height: 680 });
   }
 
   async refresh() {
@@ -546,8 +579,14 @@ export default class Maestro extends View {
   }
 
   petOf(x) {
-    const chosen = (shared("maestro.pets") ?? {})[x.tagKey] ?? shared("maestro.pet") ?? "maestro";
-    return this.pets.find((p) => p.id === chosen && !p.error) ?? this.pets.find((p) => !p.error) ?? null;
+    const live = { default: shared("maestro.pet") ?? null, sessions: shared("maestro.pets") ?? {} };
+    // A pick made only in the live cache (the footer's click) is written through to choices.json.
+    const picked = live.sessions[x.tagKey];
+    if (this.primary && this.choices && picked && this.choices.sessions[x.tagKey] !== picked && !this.saving) {
+      this.saving = true;
+      this.cx.spawn(async () => { try { await this.saveChoice(x.tagKey, picked); } finally { this.saving = false; } });
+    }
+    return resolvePet(this.pets, chosenPet(live, x.tagKey));
   }
 
   pet(x, size = 26) {

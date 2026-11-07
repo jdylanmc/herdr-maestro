@@ -27,6 +27,7 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 | `cmd-shift-m` | Toggle the Maestro layout (Catppuccin with the Maestro column) |
 | `cmd-shift-b` | Open the board window (Maestro layout) |
 | `cmd-shift-t` | Edit tags of the focused session (Maestro layout) |
+| `cmd-shift-k` | Open the pet pokedex (Maestro layout; `cmd-shift-p` is Herdr's palette) |
 
 **Hierarchy** (replaces Herdr's separate spaces and agents lists in the Maestro layout)
 - **Space** → **worktree/repo** → **agent card** → its **internal tasks** (Copilot subagents) and
@@ -37,10 +38,27 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there.
 
-**Pets** are [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`) and cmux Maestro's own
-pet, rendered once by `mods/maestro/pets.mjs` into one GIF per mood under
-`data/maestro/pets/` (Herdr plays GIFs natively). Click the footer pet to switch pets for a session;
-**Moods…** previews each mood. WebP sheets need `sips` (macOS) or ImageMagick.
+**Pets** are Codex-format sprite sheets (8 columns of 192×208 cells; 9-row sheets or 20-row mood
+atlases) from [Codex pets](https://codexpets.org/gallery) (`~/.codex/pets`), cmux Maestro's own pet,
+and pets you add (`data/maestro/pet-sources/`). The first id found wins, in that order.
+- **Rendering:** `mods/maestro/pets.mjs` turns each mood row into an animated GIF under
+  `data/maestro/pets/<id>/` (Herdr plays GIFs natively). Maestro shows the last `index.json` at once
+  and renders in a detached background process (`helper.mjs pets --bg`); unchanged sheets are
+  skipped, a sheet that fails is listed with its error instead of stopping the rest, and
+  `progress.json` reports how far it got. PNG sheets decode in pure JavaScript; WebP and other
+  formats convert with `sips` on macOS and ImageMagick (`magick` on `PATH`) on Linux and Windows.
+- **Choosing:** each session keeps its pet in `data/maestro/pets/choices.json`
+  (`{ "default": id, "sessions": { "<copilot session id>": id } }`, written atomically), so it
+  survives app restarts and `copilot --resume`. Herdr's `shared("maestro.pets")` mirrors it live.
+  Agents choose their own with `maestro pet use <id>`; the footer pet cycles pets; **Moods…**
+  previews each mood.
+- **Pokedex** (`cmd-shift-k`, the `maestro-pets` mod): every pet with its idle animation, source and
+  render errors; select one for its description, all 15 moods (9-row sheets reuse rows for moods
+  they lack), the sessions using it, **Use for focused session** and **Make default**. **Rescan**
+  renders new or changed sheets in the background; **Re-render all** forces every sheet.
+- **Adding:** `maestro pet add <folder | pet.json>` copies the manifest and sheet into
+  `data/maestro/pet-sources/<id>` (`--link` links the folder instead) and renders it.
+  `maestro pet render [--force]` re-renders from the shell.
 
 **Footer** for the focused session: large pet, name, status, terminal and parent, model and
 effort, context, elapsed time, AIC and lines changed, branch and folder, tags, session id, and
@@ -63,6 +81,8 @@ maestro tag add|rm|set|ls [tags]
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
 maestro icon <preset|glyph> [#rrggbb]   # robot, code, bug, eye, shield, compass, brush, …
+maestro pet ls | use <id|clear> | default <id>
+maestro pet add <folder|pet.json> [--link] [--force] | render [--force]
 maestro readiness                       # why this session is or is not fully visible
 ```
 
@@ -85,7 +105,8 @@ Workers are always visible interactive tabs. Worktrees are sibling checkouts
 
 ## Layout
 
-- `mods/maestro/`, `mods/maestro-tags/`: Herdr app mods.
+- `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`: Herdr app mods
+  (`mods/maestro-pets/petlib.js` is a copy of `mods/maestro/petlib.js`; mods cannot import across folders).
 - `layouts/maestro.json`: the Maestro layout.
 - `bin/`: `maestro` CLI and the status-line bridge.
 - `skills/herdr-maestro/`: Copilot skill for the CLI.

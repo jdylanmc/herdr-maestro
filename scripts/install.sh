@@ -9,7 +9,7 @@ KEY="${MAESTRO_KEY:-cmd-shift-m}"
 RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-catppuccin}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
+  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
     if [[ -L "$p" && "$(readlink "$p")" == "$ROOT"* ]]; then rm "$p"; echo "removed $p"; fi
   done
   python3 "$ROOT/scripts/lib/uninstall.py" "$COPILOT/settings.json" "$HERDR/keys.json"
@@ -25,6 +25,7 @@ link() {
 
 link "$ROOT/mods/maestro" "$HERDR/mods/maestro"
 link "$ROOT/mods/maestro-tags" "$HERDR/mods/maestro-tags"
+link "$ROOT/mods/maestro-pets" "$HERDR/mods/maestro-pets"
 mkdir -p "$HOME/.local/bin" "$COPILOT/skills"
 link "$ROOT/bin/maestro" "$HOME/.local/bin/maestro"
 link "$ROOT/skills/herdr-maestro" "$COPILOT/skills/herdr-maestro"
@@ -60,6 +61,7 @@ def bindings(d):
     d.setdefault("layout:maestro", {})[key] = f"layout.switch:{back}"
     d["layout:maestro"].setdefault("cmd-shift-b", "maestro.board")
     d["layout:maestro"].setdefault("cmd-shift-t", "maestro.tags")
+    d["layout:maestro"].setdefault("cmd-shift-k", "maestro.pets")
 
 print("copilot statusLine:", "updated" if edit(settings, status_line) else "unchanged")
 print("herdr keys:", "updated" if edit(keys, bindings) else "unchanged")
@@ -67,4 +69,5 @@ PY
 
 herdr-app check "$ROOT/mods/maestro"
 herdr-app check "$ROOT/mods/maestro-tags"
+herdr-app check "$ROOT/mods/maestro-pets"
 echo "Maestro installed. $KEY toggles the maestro layout. Restart Copilot sessions to enable the status-line bridge."
