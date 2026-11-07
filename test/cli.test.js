@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratch } from "./helpers.js";
@@ -64,4 +64,14 @@ test("notify queues a toast for the mod", (t) => {
   const [file] = readdirSync(dir);
   assert.equal(file, `${r.out.queued}.json`);
   assert.deepEqual((({ from, title, body }) => ({ from, title, body }))(JSON.parse(readFileSync(join(dir, file), "utf8"))), { from: TERM, title: "Build", body: "is green" });
+});
+
+test("tag normalizes tags saved before slugs were enforced", (t) => {
+  const { home, maestro, record } = setup(t);
+  const dir = join(home, "data", "maestro", "agents");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${TERM}.json`), JSON.stringify({ tags: ["foo_bar", "release/2026"] }));
+  assert.deepEqual(maestro(["tag", "rm", "foo_bar"]).out, ["release-2026"]);
+  assert.deepEqual(maestro(["tag", "add", "release/2026"]).out, ["release-2026"]);
+  assert.deepEqual(record().tags, ["release-2026"]);
 });

@@ -177,7 +177,8 @@ const commands = {
   // Colors belong to the human (picked in the tag editor); agents only read them.
   tag([op, ...tags]) {
     const me = needMe();
-    const cur = new Set(recordOf(me).tags ?? []);
+    // Records written before slugs were enforced may hold raw tags; normalize them like the editor does.
+    const cur = new Set((recordOf(me).tags ?? []).map(slug).filter(Boolean));
     const slugs = tags.flatMap((x) => x.split(",")).map(slug).filter(Boolean);
     if (op === "add") slugs.forEach((x) => cur.add(x));
     else if (op === "rm") slugs.forEach((x) => cur.delete(x));
