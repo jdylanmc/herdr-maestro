@@ -124,7 +124,7 @@ Workers are always visible interactive tabs. Worktrees are sibling checkouts
 
 ## Contributing
 
-Requires Node 22.13 or later.
+Requires Node 22.13+ (22.x), 24.x, or 26+.
 
 ```sh
 npm ci
