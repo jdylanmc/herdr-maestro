@@ -109,14 +109,14 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** the Maestro mod and its launch menu cache `knownAgents()` (key, name, run, installed) in `shared("maestro.knownAgents")`; the CLI reads it from `shared.json`, else a fallback table (`copilot`, `claude`, `codex`, `cursor-agent`, `gemini`, `opencode`, `pi`, `amp`) and errors with the known names.
 **Closes with:** `herdr-app agents --json` (or `knownAgents` over `herdr-app do`).
 
-### G-15 - Long app-home paths exceed the macOS socket limit
+### G-18 - Long app-home paths exceed the macOS socket limit
 
 **Wanted:** validate a mod in an isolated Herdr window under a session artifact directory.
 **Evidence:** a 105-byte `<app-home>/herdr-app.sock` path made `herdr-app status`, `do` and `shot` fail with "path must be shorter than SUN_LEN".
 **Shipped:** rendering validation uses a short temporary app home instead.
 **Closes with:** placing the control socket under a short runtime directory independently of `HERDR_APP_HOME`.
 
-### G-16 - Background launches have no provider-neutral first task
+### G-19 - Background launches have no provider-neutral first task
 
 **Wanted:** combine `maestro spawn --bg --agent <name>` with `--task` for non-Copilot agents.
 **Evidence:** `hc run --help` exposes argv and templates, but no first-task option; Herdr's `task` routing is available on `tab.new` and `space.new`, not raw background launches.
