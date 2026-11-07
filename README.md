@@ -38,6 +38,8 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 - Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
   its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
+  Hovering a card shows actions, each only on click: **interrupt** (working), **peek** and **keep as
+  tab** (pane-less workers), **park** (Maestro workers with a pane; they keep running pane-less).
 - **Tags** are short slugs (lowercase `a-z0-9-`, ≤ 24 chars, ≤ 8 per session). `cmd-shift-t` opens
   the tag editor: type to add (Enter, comma or space), × or Backspace removes, click a known tag to
   add it, click one of yours to pick its color. A color belongs to the slug everywhere and only the
@@ -89,8 +91,12 @@ Copilot agents learn these from the bundled `herdr-maestro` skill.
 ```text
 maestro whoami | peers [--all]
 maestro send <t> <message>
-maestro spawn [--name n] [--cwd d] [--worktree <branch> [--herdr-space|--sibling]] [--task text | -- argv...]
+maestro spawn [--name n] [--cwd d] [--worktree <branch> [--herdr-space|--sibling]] [--bg] [--task text | -- argv...]
 maestro close <t>                       # only workers this agent (or its workers) launched
+maestro wait [<t>...] [--any|--all]     # this agent's workers by default; replaces sleeping/polling
+maestro interrupt <t>                   # stop a worker's turn (own workers only)
+maestro peek <t> | keep <t> [--place tab|right|down] | park <t>   # keep/park: own workers only
+maestro put <t> <file>                  # send a file beside a terminal
 maestro worktree ls | rm <path|branch> [--force]
 maestro notify <title> [body]           # Herdr toast that focuses the agent when clicked
 maestro tag add|rm|set|ls [tags]        # ls shows each tag's human-picked color
@@ -102,7 +108,7 @@ maestro pet add <folder|pet.json> [--link] [--force] | render [--force]
 maestro readiness                       # why this session is or is not fully visible
 ```
 
-Workers are always visible interactive tabs. Worktrees are sibling checkouts
+Workers are interactive tabs, or pane-less sub-agents with `--bg`. Worktrees are sibling checkouts
 `<repo>-<branch>` by default; `--herdr-space` (or `MAESTRO_WORKTREE=herdr`, or
 `shared("maestro.worktreeKind") = "herdr"`) makes one the way Herdr's worktree mod does,
 `~/.herdr/worktrees/<repo>/<branch>` in its own space nested under the repo's. `worktree ls` shows

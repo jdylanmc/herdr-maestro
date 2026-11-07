@@ -4,7 +4,7 @@
 // own tags and mood. Everything goes through herdr-core (`hc`) and the Herdr app
 // (`herdr-app do`); Maestro's mod reads the files written under data/maestro/.
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, copyFileSync, rmSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -94,7 +94,7 @@ function world() {
     const w = where.get(t.address) ?? (t.parent ? where.get(t.parent) : null) ?? {};
     const rec = recordOf(t.address);
     const lab = t.labels ?? {};
-    return { address: t.address, name: rec.name ?? lab["maestro.name"] ?? t.name ?? null, agent: t.agent ?? null, status: (typeof t.status === "object" ? t.status?.state : t.status) ?? w.status ?? null, cwd: t.cwd, space: w.space ?? null, space_name: w.space_name ?? null, tab_name: w.tab_name ?? null, parent: rec.parent ?? lab["maestro.parent"] ?? t.parent ?? null, tags: rec.tags ?? [], mood: rec.mood ?? null };
+    return { address: t.address, name: rec.name ?? lab["maestro.name"] ?? t.name ?? null, agent: t.agent ?? null, status: (typeof t.status === "object" ? t.status?.state : t.status) ?? w.status ?? null, cwd: t.cwd, space: w.space ?? null, space_name: w.space_name ?? null, tab_name: w.tab_name ?? null, parent: rec.parent ?? lab["maestro.parent"] ?? t.parent ?? null, hc_parent: t.parent ?? null, tags: rec.tags ?? [], mood: rec.mood ?? null };
   });
 }
 
@@ -108,11 +108,62 @@ const descendants = (all, root) => {
   return kids;
 };
 
+// A live terminal (address or Maestro name) this agent or its workers launched; anything else exits 3.
+function ownTarget(target, verb) {
+  const me = needMe();
+  if (!target) fail(`usage: maestro ${verb} <terminal>`);
+  const all = world();
+  const t = all.find((x) => x.address === target || x.name === target);
+  if (!t) fail(`no live terminal ${target}`);
+  if (!descendants(all, me).has(t.address)) fail(`denied: ${t.address} was not launched by ${me} or its workers`, 3);
+  return t;
+}
+
+function parseWait(args) {
+  const o = { targets: [], mode: "any", timeout: null };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--any" || a === "--all") o.mode = a.slice(2);
+    else if (a === "--children") { const m = args[++i]; if (m !== "any" && m !== "all") fail("--children takes any or all"); o.mode = m; }
+    else if (a === "--timeout") { o.timeout = Number(args[++i]); if (!(o.timeout > 0)) fail("--timeout takes seconds > 0"); }
+    else if (a.startsWith("-")) fail(`unknown option ${a}; usage: maestro wait [<t>...] [--any|--all] [--timeout s]`);
+    else o.targets.push(a);
+  }
+  return o;
+}
+
+// One `hc wait` as a cancellable promise: resolves with its JSON (or the error text).
+function hcWait(args) {
+  let child;
+  const p = new Promise((done) => {
+    child = execFile("hc", ["wait", ...args, "--json"], { encoding: "utf8" }, (err, stdout, stderr) => {
+      if (err && err.killed) return done(null);
+      try { done(JSON.parse(stdout)); } catch { done({ error: (stderr || err?.message || "hc wait failed").trim(), args }); }
+    });
+  });
+  return { p, cancel: () => { try { child.kill(); } catch {} } };
+}
+
+// What finished, flattened: a children wait reports each child that stopped.
+const finishedOf = (r) => (!r ? [] : r.error ? [r] : r.reason === "children" ? (r.children ?? []) : [r])
+  .map((x) => (x.error ? x : { terminal: x.terminal, reason: x.reason, status: x.status ?? null, exit_code: x.exit_code ?? null, ...(x.signal != null ? { signal: x.signal } : {}) }));
+
+// A pane-less worker: an hc child of this agent, shown as a sub-agent under it in Herdr and Maestro.
+function spawnBg(me, opt, argv) {
+  const hcName = opt.name ? opt.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) : "";
+  const labels = [`maestro.parent=${me}`, ...(opt.name ? [`maestro.name=${opt.name}`] : [])].flatMap((l) => ["--label", l]);
+  const made = json("hc", ["run", "--bg", "--json", ...(hcName ? ["--name", hcName] : []), "--cwd", opt.cwd, ...labels, "--", ...argv]);
+  if (!made.address) fail("hc run returned no terminal");
+  saveRecord(made.address, { parent: me, name: opt.name ?? null, launched: Date.now(), launcher: me, worktree: opt.worktree ? opt.cwd : null, background: true });
+  if (opt.worktree) writeJson(WORKTREES, { ...worktrees(), [opt.cwd]: { ...worktrees()[opt.cwd], terminal: made.address } });
+  out({ address: made.address, parent: me, background: true, ...(opt.worktree ? { worktree: opt.cwd } : {}) });
+}
+
 const commands = {
   whoami() {
     const me = needMe();
-    const self = world().find((t) => t.address === me);
-    out(self ?? { address: me });
+    const { hc_parent, ...self } = world().find((t) => t.address === me) ?? { address: me };
+    out(self);
   },
 
   peers(args) {
@@ -147,6 +198,7 @@ const commands = {
       else if (a === "--task") opt.task = args[++i];
       else if (a === "--worktree") opt.worktree = args[++i];
       else if (a === "--herdr-space" || a === "--sibling") opt.kindFlag = a;
+      else if (a === "--bg") opt.bg = true;
       else if (a === "--") { opt.argv = args.slice(i + 1); break; }
       else if (!opt.task) opt.task = a;
     }
@@ -154,6 +206,7 @@ const commands = {
     if (opt.worktree) opt.cwd = makeWorktree(opt.cwd, opt.worktree, me, kind);
     const self = world().find((t) => t.address === me);
     const argv = ["node", HELPER, "run", ...(opt.argv?.length ? opt.argv : [...DEFAULT_ARGV, ...(opt.task ? ["-i", opt.task] : [])])];
+    if (opt.bg) return spawnBg(me, opt, argv);
     // A Herdr worktree gets its own unnamed space (named after its folder, nested under the repo's);
     // everything else opens as a tab in this agent's space.
     const [verb, req] = kind === "herdr"
@@ -176,6 +229,78 @@ const commands = {
     if (!descendants(all, me).has(t.address)) fail(`denied: ${t.address} was not launched by ${me} or its workers`, 3);
     run("herdr-app", ["do", "terminal.kill", JSON.stringify({ terminal: t.address })]);
     out({ closed: t.address });
+  },
+
+  // Wait for this agent's workers (or the given terminals): --any returns at the first news, --all when none works.
+  async wait(args) {
+    const me = needMe();
+    const o = parseWait(args);
+    const extra = o.timeout ? ["--timeout", String(o.timeout)] : [];
+    let waits = [];
+    if (o.targets.length) {
+      const all = world();
+      for (const x of o.targets) {
+        const t = all.find((y) => y.address === x || y.name === x);
+        if (!t) fail(`no live terminal ${x}`);
+        waits.push(hcWait([t.address, ...extra]));
+      }
+    } else {
+      // hc children (background workers) in one wait; tab workers are not hc children, so wait on each.
+      const all = world();
+      const tabKids = all.filter((t) => t.parent === me && t.hc_parent !== me);
+      if (all.some((t) => t.hc_parent === me) || !tabKids.length) waits.push(hcWait(["--children", o.mode, ...extra]));
+      for (const t of tabKids) waits.push(hcWait([t.address, ...extra]));
+    }
+    let results;
+    if (o.mode === "all" || waits.length === 1) results = await Promise.all(waits.map((w) => w.p));
+    else {
+      results = [await Promise.race(waits.map((w) => w.p))];
+      waits.forEach((w) => w.cancel());
+    }
+    const finished = results.flatMap(finishedOf);
+    const reasons = [...new Set(results.filter(Boolean).map((r) => r.error ? "error" : r.reason))];
+    out({ mode: o.mode, reason: reasons.length === 1 ? reasons[0] : reasons, finished });
+  },
+
+  // Stop a worker's current turn (not its process).
+  interrupt([target]) {
+    const t = ownTarget(target, "interrupt");
+    out({ terminal: t.address, ...json("hc", ["interrupt", t.address, "--json"]) });
+  },
+
+  // Peek at any terminal over the tab (read-only view with keep-as-tab and close).
+  peek([target]) {
+    if (!target) fail("usage: maestro peek <terminal>");
+    const t = world().find((x) => x.address === target || x.name === target);
+    if (!t) fail(`no live terminal ${target}`);
+    run("herdr-app", ["do", "terminal.peek", JSON.stringify({ terminal: t.address })]);
+    out({ peek: t.address });
+  },
+
+  // Give a pane-less worker a pane (tab by default, or right/down).
+  keep([target, ...flags]) {
+    const pi = flags.indexOf("--place");
+    const place = pi >= 0 ? flags[pi + 1] : null;
+    if (place && !["tab", "right", "down"].includes(place)) fail("--place takes tab, right or down");
+    const t = ownTarget(target, "keep");
+    run("herdr-app", ["do", "terminal.keep", JSON.stringify({ terminal: t.address, ...(place ? { place } : {}) })]);
+    out({ kept: t.address, place: place ?? "tab" });
+  },
+
+  // Remove a worker's pane; it keeps running as a pane-less sub-agent.
+  park([target]) {
+    const t = ownTarget(target, "park");
+    run("herdr-app", ["do", "terminal.park", JSON.stringify({ terminal: t.address })]);
+    out({ parked: t.address });
+  },
+
+  // Send a local file beside a terminal (on its machine); prints where it landed.
+  put([target, file]) {
+    if (!target || !file) fail("usage: maestro put <terminal> <file>");
+    if (!existsSync(file)) fail(`${file} not found`);
+    const t = world().find((x) => x.address === target || x.name === target);
+    if (!t) fail(`no live terminal ${target}`);
+    out({ terminal: t.address, ...json("hc", ["put", t.address, file, "--json"]) });
   },
 
   notify([title, ...body]) {
@@ -356,7 +481,16 @@ const commands = {
                  [--herdr-space|--sibling]  … or Herdr's: ~/.herdr/worktrees/<repo>/<branch> in its own
                                        space nested under the repo's (default: MAESTRO_WORKTREE or
                                        shared maestro.worktreeKind = herdr|sibling, else sibling)
+                 [--bg]                 … without a pane (a sub-agent under this one; peek or keep it)
   maestro close <t>                    close a worker this agent (or its workers) launched
+  maestro wait [<t>...] [--any|--all] [--timeout s]
+                                       wait for workers (default: this agent's) instead of polling
+  maestro interrupt <t>                stop a worker's current turn (its own workers only)
+  maestro peek <t>                     peek at a terminal over the tab
+  maestro keep <t> [--place tab|right|down]
+                                       give a pane-less worker a pane (its own workers only)
+  maestro park <t>                     remove a worker's pane; it keeps running (its own workers only)
+  maestro put <t> <file>               send a file beside a terminal; prints where it landed
   maestro worktree ls | rm <path|branch> [--force]
                                        worktrees Maestro created (kind sibling|herdr); rm only when
                                        clean and no live terminal is in it
@@ -378,4 +512,4 @@ const commands = {
 const [cmd = "help", ...rest] = process.argv.slice(2);
 const fn = commands[cmd] ?? commands[cmd.replace(/^--?/, "")];
 if (!fn) fail(`unknown command ${cmd}; see maestro help`);
-try { fn(rest); } catch (e) { fail(e.stderr?.toString().trim() || e.message); }
+try { await fn(rest); } catch (e) { fail(e.stderr?.toString().trim() || e.message); }

@@ -654,7 +654,7 @@ export default class Maestro extends View {
     const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(10).pr(8).py(7).gap(10).items_center().rounded(8).opacity(finished ? 0.6 : 1)
       .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => this.focus(x))
-      .on_hover((hovered) => { if (hovered) this.readScreen(a.address); })
+      .on_hover((on, cx) => { if (on) this.readScreen(a.address); this.hoverCard(a.address, on, cx); })
       .when(a.focused, (el) => el.child(div().absolute().left(0).top(6).bottom(6).w(3).rounded(2).bg(t.working)))
       .child(this.icon(t, x, 22))
       .child(v_flex().flex_1().min_w(0).gap(2)
@@ -669,6 +669,7 @@ export default class Maestro extends View {
             .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
             .child("✓"))))
         .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
+      .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
       .child(this.pet(x, 26));
     return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
@@ -676,6 +677,28 @@ export default class Maestro extends View {
         .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("left_center")
           .trigger(body)
           .content(this.preview(t, x, now, why, tags))));
+  }
+
+  hoverCard(address, on, cx) {
+    if (on) this.hovered = address;
+    else if (this.hovered === address) this.hovered = null;
+    cx.notify();
+  }
+
+  // Lifecycle actions shown while a card is hovered; each acts only on its own click.
+  cardActions(t, x) {
+    const { a } = x;
+    const acts = [];
+    if (a.status === "working") acts.push(["int", "\uf04d", "Interrupt its turn", () => hc(["interrupt", a.address])]);
+    if (!a.pane) acts.push(["peek", "\uf06e", "Peek", () => run("terminal.peek", { terminal: a.address })]);
+    if (!a.pane) acts.push(["keep", "\uf2d0", "Keep as tab", () => run("terminal.keep", { terminal: a.address })]);
+    if (a.pane && x.rec.launcher) acts.push(["park", "\uf187", "Park (keeps running without a pane)", () => run("terminal.park", { terminal: a.address })]);
+    return h_flex().id(`acts-${a.address}`).flex_none().gap(2).items_center()
+      .children(acts.map(([k, glyph, tip, act]) => div().id(`act-${k}-${a.address}`).size(20).flex().items_center().justify_center().rounded(4)
+        .font_family(NERD).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); act(); })
+        .child(glyph)));
   }
 
   // Passive hover preview: read-only facts, no handlers.
