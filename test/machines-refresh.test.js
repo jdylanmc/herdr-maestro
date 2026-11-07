@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { machineOf } from "../mods/maestro/machines.js";
+import { machineOf, spaceEntries } from "../mods/maestro/machines.js";
+import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 
 // Load the real view with host imports removed; these tests exercise only its async jobs.
 const source = readFileSync(new URL("../mods/maestro/main.js", import.meta.url), "utf8")
@@ -10,7 +11,7 @@ const source = readFileSync(new URL("../mods/maestro/main.js", import.meta.url),
   .replace("export default class Maestro", "class Maestro");
 
 function view(host = {}) {
-  const Maestro = runInNewContext(`${source}\nMaestro`, { View: class {}, machineOf, ...host });
+  const Maestro = runInNewContext(`${source}\nMaestro`, { View: class {}, machineOf, spaceEntries, nestSpaces, spacePlace, ...host });
   const v = new Maestro();
   v.snaps = new Map();
   v.fallback = new Map();
@@ -122,4 +123,31 @@ test("a stalled remote git job neither blocks new local folders nor overlaps on 
   await jobs[0];
   assert.equal(v.gitOf("/remote", "slow").repo, "remote");
   assert.equal(v.gitBusy.size, 0);
+});
+
+test("machine headers retain worktree nesting without nesting across machines", () => {
+  const list = [
+    { id: "s-child", folder: "/local-child", machine: null },
+    { id: "s-main", folder: "/repo", machine: null },
+    { id: "box/orphan", folder: "/remote-child", machine: "box" },
+    { id: "box/child", folder: "/other-child", machine: "box" },
+    { id: "box/main", folder: "/other", machine: "box" },
+  ];
+  const v = view({ spaces: () => list, panes: () => [] });
+  v.machineList = [];
+  v.folded = new Set();
+  for (const [key, main, linked] of [
+    ["/local-child", "/repo", true],
+    ["/repo", "/repo", false],
+    ["box:/remote-child", "/repo", true],
+    ["box:/other-child", "/other", true],
+    ["box:/other", "/other", false],
+  ]) v.git.set(key, { v: { main, linked } });
+  const rows = Array.from(v.nestedSpaces(), ({ sp, tree }) => [sp.id, tree]);
+  assert.deepEqual(rows, [
+    ["mc:local", null], ["s-main", null], ["s-child", "└─"],
+    ["mc:box", null], ["box/orphan", null], ["box/main", null], ["box/child", "└─"],
+  ]);
+  v.folded.add("mc:box");
+  assert.deepEqual(Array.from(v.nestedSpaces(), ({ sp }) => sp.id), ["mc:local", "s-main", "s-child", "mc:box"]);
 });
