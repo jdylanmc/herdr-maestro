@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DIR = join(ROOT, "test", `.fake-${process.pid}`);
+const DIR = join(ROOT, ".test-tmp", `maestro-cli-${process.pid}`);
 const BIN = join(DIR, "bin");
 const LOG = join(DIR, "calls.jsonl");
 const skip = process.platform === "win32" ? "fake programs are shell scripts" : false;
@@ -22,13 +22,14 @@ const TERMINALS = [
 ];
 
 const FAKE = `#!/usr/bin/env node
-const fs = require("fs");
-const name = require("path").basename(process.argv[1]);
+import * as fs from "node:fs";
+import { basename } from "node:path";
+const name = basename(process.argv[1]);
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify([name, ...a]) + "\\n");
 const T = JSON.parse(process.env.FAKE_TERMINALS);
 const say = (v) => process.stdout.write(JSON.stringify(v));
-if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [{ id: "s1", name: "Workspace", tabs: [{ id: "tab1", name: "Parent", terminals: [{ terminal: "t1" }] }] }] } : { ok: true });
+if (name === "herdr-app") say(a[0] === "ls" ? { spaces: [{ id: "s1", name: "Workspace", tabs: [{ id: "tab1", name: "Parent", terminals: [{ terminal: "t1" }] }] }] } : a[1] === "tab.new" ? { terminal: "t7", tab: "tab7", space: "s1" } : { ok: true });
 else if (a[0] === "ls") say({ terminals: T.map(({ labels, ...t }) => t) });
 else if (a[0] === "get") say(T.find((t) => t.address === a[1]) ?? {});
 else if (a[0] === "run") say({ address: "t7", state: "live" });
@@ -38,11 +39,11 @@ else if (a[0] === "wait" && a[1] === "--children") say({ reason: "children", ter
 else if (a[0] === "wait") setTimeout(() => say({ reason: "idle", terminal: a[1], status: "idle", exit_code: null }), a[1] === "t3" ? 3000 : 10);
 `;
 
-function maestro(args, me = "t1") {
+function maestro(args, me = "t1", terminals = TERMINALS) {
   writeFileSync(LOG, "");
   const r = spawnSync(process.execPath, [join(ROOT, "bin", "maestro"), ...args], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, HC_TERMINAL_ID: me, HERDR_APP_HOME: join(DIR, "home"), FAKE_LOG: LOG, FAKE_TERMINALS: JSON.stringify(TERMINALS) },
+    env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, HC_TERMINAL_ID: me, HERDR_APP_HOME: join(DIR, "home"), FAKE_LOG: LOG, FAKE_TERMINALS: JSON.stringify(terminals) },
   });
   const calls = readFileSync(LOG, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null, err: r.stderr, calls, acts: calls.filter((c) => !["ls", "get"].includes(c[1])) };
@@ -118,4 +119,25 @@ test("peers includes a parked label-only worker in its parent's space", { skip }
   assert.equal(parked.parent, "t1");
   assert.equal(parked.space, "Workspace");
   assert.ok(!r.out.some((t) => t.address === "t9"));
+});
+
+test("nested background workers share their ancestor's space for peers and tab spawns", { skip }, () => {
+  for (const me of ["t1", "t2", "t3"]) {
+    const r = maestro(["peers"], me);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.out.map((t) => t.address).sort(), ["t1", "t2", "t3", "t4"].filter((t) => t !== me));
+    assert.ok(r.out.every((t) => t.space === "Workspace"));
+  }
+  const spawned = maestro(["spawn", "--name", "Nested tab"], "t3");
+  assert.equal(spawned.code, 0, spawned.err);
+  const tab = spawned.acts.find((c) => c[1] === "do" && c[2] === "tab.new");
+  assert.equal(JSON.parse(tab[3]).space, "s1");
+});
+
+test("space inheritance terminates on a cyclic parent chain", { skip }, () => {
+  const terminals = [...TERMINALS, { address: "t5", agent: "copilot", parent: "t6" }, { address: "t6", agent: "copilot", parent: "t5" }];
+  const r = maestro(["whoami"], "t5", terminals);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out.space, null);
+  assert.equal(r.out.parent, "t6");
 });

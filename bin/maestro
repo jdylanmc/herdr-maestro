@@ -90,11 +90,24 @@ function world() {
   }
   // `hc ls` omits labels, which carry Maestro's lineage; read each terminal in full.
   const core = (json("hc", ["ls", "--json"]).terminals ?? []).map((t) => { try { return { ...t, ...json("hc", ["get", t.address, "--json"]) }; } catch { return t; } });
-  return core.map((t) => {
+  const lineage = new Map(core.map((t) => {
     const rec = recordOf(t.address);
     const lab = t.labels ?? {};
     const parent = rec.parent ?? lab["maestro.parent"] ?? t.parent ?? null;
-    const w = where.get(t.address) ?? (parent ? where.get(parent) : null) ?? {};
+    return [t.address, { rec, lab, parent }];
+  }));
+  return core.map((t) => {
+    const { rec, lab, parent } = lineage.get(t.address);
+    const visited = new Set();
+    let address = t.address;
+    let w;
+    while (address && !visited.has(address)) {
+      visited.add(address);
+      w = where.get(address);
+      if (w) break;
+      address = lineage.get(address)?.parent;
+    }
+    w ??= {};
     return { address: t.address, name: rec.name ?? lab["maestro.name"] ?? t.name ?? null, agent: t.agent ?? null, status: (typeof t.status === "object" ? t.status?.state : t.status) ?? w.status ?? null, cwd: t.cwd, space: w.space ?? null, space_name: w.space_name ?? null, tab_name: w.tab_name ?? null, parent, hc_parent: t.parent ?? null, tags: rec.tags ?? [], mood: rec.mood ?? null };
   });
 }
