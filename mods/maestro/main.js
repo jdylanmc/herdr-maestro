@@ -3,7 +3,7 @@
 // session lock's process ancestry. Trees and attention come from each session's events.jsonl.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, HoverCard } from "gpui-base";
 import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
@@ -535,7 +535,7 @@ export default class Maestro extends View {
   statusGlyph(t, x, size = 12) {
     const st = x.failed ? "failed" : x.a.status;
     if (st === "working") return svg("mods/workspace-chrome/spinner.svg").size(size).flex_none().text_color(t.working).spin(900);
-    if (st === "blocked") return h_flex().size(size + 2).flex_none().rounded(3).bg(t.accent).items_center().justify_center().text_size(size - 2).font_bold().text_color(t.background).child(x.kind === "permission" ? "!" : "?");
+    if (st === "blocked") return h_flex().size(size + 2).flex_none().rounded(3).bg(t.ansi4 ?? t.accent).items_center().justify_center().text_size(size - 2).font_bold().text_color("#ffffff").child(x.kind === "permission" ? "!" : "?");
     if (st === "failed") return div().flex_none().text_size(size).text_color(t.blocked).child("⊗");
     if (st === "done") return div().flex_none().text_size(size).text_color(t.done).child("✓");
     return div().size(size - 4).mx(2).flex_none().rounded(size).border(1.5).border_color(t.idle ?? t.dim);
@@ -550,26 +550,65 @@ export default class Maestro extends View {
     const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
     const finished = depth > 0 && (a.status === "done" || a.status === "idle");
     const stop = (_e, cx) => cx.stop_propagation();
-    const line = why ? `${why} · ${this.task(x)}` : this.task(x);
+    const asks = why && a.status === "blocked";
+    const line = asks ? why : why ? `${why} · ${this.task(x)}` : this.task(x);
+    const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(10).pr(8).py(7).gap(10).items_center().rounded(8).opacity(finished ? 0.6 : 1)
+      .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
+      .on_click(() => this.focus(x))
+      .when(a.focused, (el) => el.child(div().absolute().left(0).top(6).bottom(6).w(3).rounded(2).bg(t.working)))
+      .child(this.icon(t, x, 22))
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(h_flex().gap(6).items_center()
+          .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(this.title(x)))
+          .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags))))
+        .child(h_flex().gap(6).items_center()
+          .child(this.statusGlyph(t, x, 12))
+          .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(asks ? t.foreground : why ? t.blocked : t.muted).child(line || "—"))
+          .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(4).rounded(4).text_size(10.5).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+            .tooltip("Acknowledge (answers nothing)").on_mouse_down("left", stop)
+            .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
+            .child("✓")))))
+      .child(this.pet(x, 26));
     return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
-      .child(h_flex().id(`cardb-${a.address}`).flex_1().min_w(0).relative().pl(10).pr(8).py(7).gap(10).items_center().rounded(8).opacity(finished ? 0.6 : 1)
-        .bg(a.focused ? t.selected : t.chrome).hover((st) => st.bg(a.focused ? t.selected : t.hover))
-        .on_click(() => this.focus(x))
-        .when(a.focused, (el) => el.child(div().absolute().left(0).top(6).bottom(6).w(3).rounded(2).bg(t.working)))
-        .child(this.icon(t, x, 20))
-        .child(v_flex().flex_1().min_w(0).gap(1)
-          .child(h_flex().gap(6).items_center()
-            .child(div().flex_1().min_w(0).truncate().text_size(13.5).font_semibold().child(this.title(x)))
-            .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags))))
-          .child(h_flex().gap(6).items_center()
-            .child(this.statusGlyph(t, x, 12))
-            .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(why ? t.blocked : t.muted).child(line || "—"))
-            .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(4).rounded(4).text_size(10.5).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-              .tooltip("Acknowledge (answers nothing)").on_mouse_down("left", stop)
-              .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
-              .child("✓")))))
-        .child(this.pet(x, 26)));
+      .child(div().flex_1().min_w(0)
+        .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("top_left")
+          .trigger(body)
+          .content(this.preview(t, x, now, why, tags))));
+  }
+
+  // Passive hover preview: read-only facts, no handlers.
+  preview(t, x, now, why, tags) {
+    const { a, snap, s } = x;
+    const cost = snap?.cost;
+    const model = snap?.model?.display_name ?? s?.model ?? s?.lastModel ?? null;
+    const effort = s?.effort ?? null;
+    const ctx = snap?.context_window?.used_percentage;
+    const g = this.gitOf(x.cwd);
+    const rows = s ? treeRows(s, now, keepMs()) : [];
+    const running = rows.filter((r) => r.status === "running").length;
+    const kv = (k, v) => v == null || v === "" ? null : h_flex().gap(8).text_size(12)
+      .child(div().w(64).flex_none().text_color(t.dim).child(k))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(String(v)));
+    const lines = cost ? `+${cost.total_lines_added ?? 0} / −${cost.total_lines_removed ?? 0}` : null;
+    return v_flex().w(300).p(12).gap(6).rounded(10).bg(t.popover ?? t.raised).border_1().border_color(t.border).shadow_lg().text_color(t.foreground)
+      .child(h_flex().gap(10).items_center()
+        .child(this.pet(x, 48))
+        .child(v_flex().flex_1().min_w(0).gap(2)
+          .child(div().truncate().text_size(14).font_semibold().child(this.title(x)))
+          .child(h_flex().gap(6).items_center().child(this.statusGlyph(t, x, 11))
+            .child(div().truncate().text_size(12).text_color(t.muted).child(`${STATUS_WORD[x.failed ? "failed" : a.status] ?? a.status} · ${a.address}`)))))
+      .when(Boolean(why), (el) => el.child(div().px(8).py(4).rounded(6).bg(t.blocked + "22").text_size(12).text_color(t.blocked).child(why)))
+      .children([
+        kv("Model", model ? (effort && !model.includes(" · ") ? `${model} · ${effort}` : model) : null),
+        kv("Context", ctx != null ? `${ctx}%` : null),
+        kv("AIC", snap?.ai_used?.formatted ?? null),
+        kv("Elapsed", cost?.total_duration_ms != null ? ago(cost.total_duration_ms) : null),
+        kv("Lines", lines),
+        kv("Branch", [g?.branch ?? x.branch, g?.tree].filter(Boolean).join(" · ") || null),
+        kv("Tasks", rows.length ? `${running} running · ${rows.length - running} finished` : null),
+      ].filter(Boolean))
+      .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
   }
 
   taskGlyph(t, r) {
@@ -621,8 +660,8 @@ export default class Maestro extends View {
   tagChips(t, tags) {
     return h_flex().flex_none().gap(4).children(tags.slice(0, 3).map(({ g, mine }) => {
       const c = IDENTITY[hash(g) % IDENTITY.length];
-      return div().px(5).h(16).flex().items_center().rounded(3).border_1().border_dashed().border_color(mine ? "#11111b" : c)
-        .bg(mine ? c : c + "22").text_size(10.5).font_medium().text_color(mine ? "#11111b" : c).child(g);
+      return div().px(6).h(18).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? "#11111b" : c)
+        .bg(mine ? c : c + "22").text_size(11).font_medium().text_color(mine ? "#11111b" : c).child(g);
     }));
   }
 
