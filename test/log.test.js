@@ -23,8 +23,8 @@ test("subagents fold into a nested tree with terminal states", () => {
   ]);
   assert.equal(rows[0].name, "Explore");
   assert.equal(rows[3].name, "subagent");
-  // Finished agents drop out after keepMs; running ones stay.
-  assert.deepEqual(treeRows(s, T0 + 10_000, 4_000).map((r) => r.id), ["a", "d"]);
+  // Finished agents drop out after keepMs; running ones stay; a kept child whose parent expired moves up.
+  assert.deepEqual(treeRows(s, T0 + 10_000, 4_000).map((r) => [r.id, r.depth]), [["a", 0], ["c", 0], ["d", 0]]);
 });
 
 test("attention: permission beats question beats error; abort clears", () => {

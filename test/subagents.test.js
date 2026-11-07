@@ -24,3 +24,23 @@ test("a multi-turn background subagent idles between turns, wakes on new work, a
   applyEvent(s, ev("user.message", 3, {}, "a1"));
   assert.deepEqual([a.status, a.turns, a.ended], ["running", 2, null]);
 });
+
+test("a finished tool clears the subagent's activity but it keeps running", () => {
+  const s = emptySession();
+  applyEvent(s, ev("subagent.started", 0, { agentDisplayName: "x" }, "a1"));
+  applyEvent(s, ev("tool.execution_start", 1, { toolName: "grep", toolCallId: "c1" }, "a1"));
+  applyEvent(s, ev("tool.execution_complete", 2, { toolCallId: "c1" }, "a1"));
+  const a = s.agents.get("a1");
+  assert.deepEqual([a.status, a.activity], ["running", null]);
+});
+
+test("an idle child stays visible after its finished parent expires", () => {
+  const s = emptySession();
+  applyEvent(s, ev("subagent.started", 0, { agentDisplayName: "parent" }, "p"));
+  applyEvent(s, ev("subagent.started", 0, { agentDisplayName: "child", parentId: "p" }, "c"));
+  applyEvent(s, ev("subagent.configured", 0, { multiTurn: true }, "c"));
+  applyEvent(s, ev("subagent.completed", 1, {}, "c"));
+  applyEvent(s, ev("subagent.completed", 1, {}, "p"));
+  const rows = treeRows(s, Date.parse(at(1)) + 3600_000, 600_000);
+  assert.deepEqual(rows.map((r) => [r.id, r.status, r.depth]), [["c", "idle", 0]]);
+});

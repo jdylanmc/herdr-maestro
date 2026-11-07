@@ -663,7 +663,7 @@ export default class Maestro extends View {
         kv("Elapsed", cost?.total_duration_ms != null ? ago(cost.total_duration_ms) : null),
         kv("Lines", lines),
         kv("Branch", [g?.branch ?? x.branch, g?.tree].filter(Boolean).join(" · ") || null),
-        kv("Tasks", rows.length ? `${running} running · ${rows.length - running} finished` : null),
+        kv("Tasks", rows.length ? (() => { const idle = rows.filter((r) => r.status === "idle").length; return [`${running} running`, idle ? `${idle} idle` : null, `${rows.length - running - idle} finished`].filter(Boolean).join(" · "); })() : null),
       ].filter(Boolean))
       .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
       .when(Boolean(this.screens.get(a.address)?.lines?.length), (el) => el.child(this.screenBox(t, this.screens.get(a.address).lines)));

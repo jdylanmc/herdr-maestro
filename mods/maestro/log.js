@@ -106,7 +106,11 @@ function trackAgent(s, e, d, t) {
   } else if (e.type === "tool.execution_start") {
     if (a.status === "idle") { a.status = "running"; a.ended = null; a.turns++; }
     a.activity = d.toolName ?? a.activity;
+    a.activityCall = d.toolCallId ?? null;
     if (a.status === "running") a.tools++;
+  } else if (e.type === "tool.execution_complete" && d.toolCallId && d.toolCallId === a.activityCall) {
+    a.activity = null;
+    a.activityCall = null;
   }
   a.lastAt = t ?? a.lastAt;
   // Permission and question tracking still applies to the whole session.
@@ -115,11 +119,13 @@ function trackAgent(s, e, d, t) {
 
 // Subagents as depth-first rows; finished ones stay for `keepMs` after they end.
 export function treeRows(s, now, keepMs) {
+  // Idle multi-turn agents can still be messaged, so they stay until the session ends.
+  const kept = new Set([...s.agents.values()].filter((a) => a.status === "running" || a.status === "idle" || !a.ended || now - a.ended <= keepMs).map((a) => a.id));
   const kids = new Map();
   for (const a of s.agents.values()) {
-    // Idle multi-turn agents can still be messaged, so they stay until the session ends.
-    if (a.status !== "running" && a.status !== "idle" && a.ended && now - a.ended > keepMs) continue;
-    const p = a.parent && s.agents.has(a.parent) ? a.parent : null;
+    if (!kept.has(a.id)) continue;
+    // A kept agent whose parent expired moves up to the top level.
+    const p = a.parent && kept.has(a.parent) ? a.parent : null;
     if (!kids.has(p)) kids.set(p, []);
     kids.get(p).push(a);
   }
