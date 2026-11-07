@@ -19,7 +19,7 @@ const [cmd, ...args] = process.argv.slice(2);
 
 // Maestro's view of a session log: only the event types it folds, without prompts, tool
 // arguments or results, so a log of any size answers within exec's 8 MiB output limit.
-const EVENT = /"type":"(subagent\.(started|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed|usage_record)|model\.model_call_success|user\.message|assistant\.turn_(start|end)|abort)"/;
+const EVENT = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed|usage_record)|model\.model_call_success|user\.message|assistant\.turn_(start|end)|abort)"/;
 const field = (line, k) => line.match(new RegExp(`"${k}":"([^"]*)"`))?.[1];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undefined).map((k) => [k, o[k]]));
 export function project(line) {
@@ -36,12 +36,13 @@ export function project(line) {
   const data = type.startsWith("tool.execution") ? pick(d, ["toolName", "toolCallId", "model"])
     : type === "user.message" ? pick(d, ["source"])
     : type.startsWith("assistant.turn") ? pick(d, ["parentToolCallId"])
-    : type === "subagent.started" ? pick(d, ["agentDisplayName", "agentName", "parentId", "model"])
+    : type === "subagent.started" ? pick(d, ["agentDisplayName", "agentName", "agentDescription", "executionMode", "parentId", "model"])
+    : type === "subagent.configured" ? pick(d, ["model", "reasoningEffort", "multiTurn"])
     : type === "session.schedule_created" ? pick(d, ["id", "displayPrompt", "intervalMs", "cron", "at", "recurring", "selfPaced"])
     : type === "session.start" ? pick(d, ["startTime"])
     : type === "session.model_change" ? pick(d, ["newModel", "reasoningEffort"])
     : type === "session.error" ? pick(d, ["errorType"])
-    : type.startsWith("subagent.") ? pick(d, ["cancelled"])
+    : type.startsWith("subagent.") ? pick(d, ["cancelled", "totalToolCalls", "totalTokens", "durationMs"])
     : pick(d, ["id", "requestId", "nextRunAt"]);
   return JSON.stringify({ type, timestamp: e.timestamp, ...(e.agentId ? { agentId: e.agentId } : {}), data });
 }

@@ -1,6 +1,6 @@
 // Folds a Copilot session's events.jsonl into what Maestro shows. Pure: no herdr imports.
 
-const WANTED = /"type":"(subagent\.(started|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
+const WANTED = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
 
 export function emptySession() {
   return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, schedules: new Map(), lastPromptAt: null, started: null, turnStart: null, error: null };
@@ -42,6 +42,7 @@ export function applyLines(s, text) {
 export function applyEvent(s, e) {
   const d = e.data ?? {};
   const t = Date.parse(e.timestamp) || null;
+  if (e.agentId && !e.type.startsWith("subagent.") && trackAgent(s, e, d, t)) return s;
   switch (e.type) {
     case "session.start": s.started = Date.parse(d.startTime) || t; break;
     case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; if (d.reasoningEffort) { s.effort = d.reasoningEffort; s.effortSet = true; } break;
@@ -59,14 +60,27 @@ export function applyEvent(s, e) {
     case "session.error": s.error = { type: d.errorType ?? "error", at: t }; break;
     case "subagent.started":
       if (!e.agentId) break;
-      s.agents.set(e.agentId, { id: e.agentId, name: d.agentDisplayName || d.agentName || "subagent", kind: d.agentName ?? "", parent: d.parentId ?? null, model: d.model ?? null, status: "running", started: t, ended: null });
+      s.agents.set(e.agentId, { id: e.agentId, name: d.agentDisplayName || d.agentName || "subagent", kind: d.agentName ?? "", description: d.agentDescription ?? null, mode: d.executionMode ?? null, multiTurn: false, parent: d.parentId ?? null, model: d.model ?? null, effort: null, status: "running", started: t, ended: null, turns: 1, tools: 0, tokens: null, activity: null, lastAt: t });
       break;
+    case "subagent.configured": {
+      const a = s.agents.get(e.agentId);
+      if (!a) break;
+      a.model = d.model ?? a.model;
+      a.effort = d.reasoningEffort ?? a.effort;
+      a.multiTurn = !!d.multiTurn;
+      break;
+    }
     case "subagent.completed":
     case "subagent.failed": {
       const a = s.agents.get(e.agentId);
       if (!a) break;
-      a.status = e.type === "subagent.failed" ? "failed" : d.cancelled ? "cancelled" : "done";
+      // A multi-turn (background) agent that finishes a turn stays alive, waiting for messages.
+      a.status = e.type === "subagent.failed" ? "failed" : d.cancelled ? "cancelled" : a.multiTurn ? "idle" : "done";
       a.ended = t;
+      a.lastAt = t;
+      a.activity = null;
+      if (d.totalToolCalls != null) a.tools = d.totalToolCalls;
+      if (d.totalTokens != null) a.tokens = d.totalTokens;
       break;
     }
     case "permission.requested": if (d.requestId) s.perms.add(d.requestId); break;
@@ -83,12 +97,35 @@ export function applyEvent(s, e) {
   return s;
 }
 
+// A subagent's own turns and tools: what it is doing now, and an idle agent waking up.
+function trackAgent(s, e, d, t) {
+  const a = s.agents.get(e.agentId);
+  if (!a) return e.type.startsWith("assistant.turn") || e.type === "user.message";
+  if (e.type === "assistant.turn_start" || e.type === "user.message") {
+    if (a.status === "idle") { a.status = "running"; a.ended = null; a.turns++; a.activity = null; }
+  } else if (e.type === "tool.execution_start") {
+    if (a.status === "idle") { a.status = "running"; a.ended = null; a.turns++; }
+    a.activity = d.toolName ?? a.activity;
+    a.activityCall = d.toolCallId ?? null;
+    if (a.status === "running") a.tools++;
+  } else if (e.type === "tool.execution_complete" && d.toolCallId && d.toolCallId === a.activityCall) {
+    a.activity = null;
+    a.activityCall = null;
+  }
+  a.lastAt = t ?? a.lastAt;
+  // Permission and question tracking still applies to the whole session.
+  return !(e.type.startsWith("permission.") || e.type.startsWith("tool.execution"));
+}
+
 // Subagents as depth-first rows; finished ones stay for `keepMs` after they end.
 export function treeRows(s, now, keepMs) {
+  // Idle multi-turn agents can still be messaged, so they stay until the session ends.
+  const kept = new Set([...s.agents.values()].filter((a) => a.status === "running" || a.status === "idle" || !a.ended || now - a.ended <= keepMs).map((a) => a.id));
   const kids = new Map();
   for (const a of s.agents.values()) {
-    if (a.status !== "running" && a.ended && now - a.ended > keepMs) continue;
-    const p = a.parent && s.agents.has(a.parent) ? a.parent : null;
+    if (!kept.has(a.id)) continue;
+    // A kept agent whose parent expired moves up to the top level.
+    const p = a.parent && kept.has(a.parent) ? a.parent : null;
     if (!kids.has(p)) kids.set(p, []);
     kids.get(p).push(a);
   }
