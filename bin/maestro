@@ -122,7 +122,9 @@ const commands = {
     const me = needMe();
     if (!target || !words.length) fail("usage: maestro send <terminal> <message>");
     const text = words.join(" ");
-    const name = recordOf(me).name ?? me;
+    let name = recordOf(me).name;
+    if (!name) { try { name = json("hc", ["get", me, "--json"]).labels?.["maestro.name"]; } catch {} }
+    name ??= me;
     const hit = world().find((t) => t.address === target || t.name === target);
     if (hit) target = hit.address;
     run("hc", ["send", target, `[maestro from ${me}${name !== me ? ` ${name}` : ""}] ${text}`]);
