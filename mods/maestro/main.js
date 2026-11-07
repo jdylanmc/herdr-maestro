@@ -516,7 +516,7 @@ export default class Maestro extends View {
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
       .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
         svg("mods/workspace-chrome/plus.svg").size(13))))
-      .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g, mine, kidsOf)))
+      .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
   }
 
@@ -540,9 +540,9 @@ export default class Maestro extends View {
   }
 
   // Remove only a linked checkout that is clean and has no agent in its space.
-  worktreeMenu(t, sp, g, mine, kidsOf) {
+  worktreeMenu(t, sp, g) {
     const m = this.wtMenu;
-    const agents = this.flat(mine, kidsOf).length;
+    const agents = this.sessions().filter((x) => x.a.space === sp.id).length;
     const why = !g.linked ? null : agents ? `${agents} agent${agents > 1 ? "s" : ""} still in it` : m.dirty == null ? "checking…" : m.dirty ? "uncommitted changes" : null;
     const item = (id, label, on, off) => h_flex().id(`spw-${id}-${sp.id}`).px(8).h(26).gap(8).items_center().rounded(6).text_size(12.5)
       .when(!off, (el) => el.cursor_pointer().text_color(t.foreground).hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); on(); }))

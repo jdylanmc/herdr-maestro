@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { herdrSlug, herdrPath, siblingPath, repoOf, chooseKind, kindOf, removalBlocker, spacePlace, nestSpaces } from "../mods/maestro/wtlib.js";
 
 test("Herdr worktree paths follow its mod: ~/.herdr/worktrees/<repo>/<slug>", () => {
@@ -42,6 +44,49 @@ test("removal refuses a live worker, any live terminal inside, or dirty without 
   assert.match(removalBlocker({ path, dirty: true }), /uncommitted/);
   assert.equal(removalBlocker({ path, dirty: true, force: true }), null);
   assert.equal(removalBlocker({ path, entry: { terminal: "t3" }, live: [] }), null);
+});
+
+function menuFor(sessions, space, dirty = false) {
+  const elements = new Map();
+  const element = () => {
+    const state = {};
+    const el = new Proxy(state, {
+      get: (target, key) => key in target ? target[key] : (...args) => {
+        if (key === "id") elements.set(args[0], state);
+        else if (key === "when" && args[0]) args[1](el);
+        else if (key === "on_click") state.click = args[0];
+        else if (key === "tooltip") state.tip = args[0];
+        return el;
+      },
+    });
+    return el;
+  };
+  const source = readFileSync(new URL("../mods/maestro/main.js", import.meta.url), "utf8");
+  const method = source.slice(source.indexOf("  worktreeMenu("), source.indexOf("  railSpace("));
+  const view = runInNewContext(`({${method}})`, { h_flex: element, v_flex: element, div: element, svg: element });
+  view.sessions = () => sessions;
+  view.wtMenu = { id: space, dirty };
+  view.worktreeMenu({}, { id: space }, { linked: true });
+  return elements.get(`spw-rm-${space}`);
+}
+
+test("worktree menu blocks agents in their actual space even when hidden or nested elsewhere", () => {
+  for (const status of ["working", "blocked", "idle", "done"]) {
+    const sessions = [
+      { a: { address: "parent", space: "main", status: "working" } },
+      { a: { address: "child", parent: "parent", space: "worktree", status } },
+    ];
+    const remove = menuFor(sessions, "worktree");
+    assert.equal(remove.click, undefined, status);
+    assert.match(remove.tip, /1 agent still in it/, status);
+  }
+});
+
+test("worktree menu does not count children in another space and keeps the dirty guard", () => {
+  const sessions = [{ a: { address: "child", parent: "gone", space: "other", status: "working" } }];
+  assert.equal(typeof menuFor(sessions, "worktree").click, "function");
+  assert.match(menuFor(sessions, "worktree", true).tip, /uncommitted changes/);
+  assert.match(menuFor(sessions, "worktree", null).tip, /checking/);
 });
 
 test("spacePlace prefers the first terminal's folder", () => {
