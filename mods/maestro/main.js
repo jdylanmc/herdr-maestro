@@ -7,6 +7,7 @@ import { v_flex, h_flex, HoverCard } from "gpui-base";
 import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
+import { parseRead, screenLines, promptLine } from "./screen.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
@@ -89,6 +90,7 @@ export default class Maestro extends View {
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
     this.pets = [];             // rendered pets (data/maestro/pets/index.json)
     this.choices = null;        // data/maestro/pets/choices.json, once read
+    this.screens = new Map();   // terminal address -> { lines, prompt, at, busy }; memory only, never written
     cx.spawn(async (cx) => { await this.loadPets(); cx.notify(); });
     cx.spawn(async (cx) => {
       for (const d of [snapDir(), agentDir(), notifyDir()]) await fs.mkdir(d, { recursive: true }).catch(() => {});
@@ -331,6 +333,7 @@ export default class Maestro extends View {
     const t = theme();
     const now = Date.now();
     const list = this.sessions();
+    if (this.view !== "footer") this.watchBlocked(list);
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
     this.refreshGit(list);
@@ -603,6 +606,7 @@ export default class Maestro extends View {
     const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(10).pr(8).py(7).gap(10).items_center().rounded(8).opacity(finished ? 0.6 : 1)
       .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => this.focus(x))
+      .on_hover((hovered) => { if (hovered) this.readScreen(a.address); })
       .when(a.focused, (el) => el.child(div().absolute().left(0).top(6).bottom(6).w(3).rounded(2).bg(t.working)))
       .child(this.icon(t, x, 22))
       .child(v_flex().flex_1().min_w(0).gap(2)
@@ -615,7 +619,8 @@ export default class Maestro extends View {
           .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(4).rounded(4).text_size(10.5).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
             .tooltip("Acknowledge (answers nothing)").on_mouse_down("left", stop)
             .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
-            .child("✓")))))
+            .child("✓"))))
+        .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
       .child(this.pet(x, 26));
     return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
@@ -656,7 +661,46 @@ export default class Maestro extends View {
         kv("Branch", [g?.branch ?? x.branch, g?.tree].filter(Boolean).join(" · ") || null),
         kv("Tasks", rows.length ? `${running} running · ${rows.length - running} finished` : null),
       ].filter(Boolean))
-      .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
+      .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
+      .when(Boolean(this.screens.get(a.address)?.lines?.length), (el) => el.child(this.screenBox(t, this.screens.get(a.address).lines)));
+  }
+
+  // ---- Live screen text (hc read): memory only, fetched lazily, never written to disk ----
+  // Reads the terminal's screen at most every 3 s; render never waits on it.
+  readScreen(addr, minAge = 3000) {
+    const e = this.screens.get(addr) ?? { lines: [], prompt: "", at: 0, busy: false };
+    if (e.busy || Date.now() - e.at < minAge || !this.cx) return;
+    e.busy = true;
+    this.screens.set(addr, e);
+    this.cx.spawn(async (cx) => {
+      try {
+        const r = await hc(["read", addr, "--lines", "10", "--json"]);
+        const text = parseRead(r.stdout);
+        e.lines = screenLines(text, 8, 160);
+        e.prompt = promptLine(text, 160);
+      } catch {} finally { e.at = Date.now(); e.busy = false; }
+      cx.notify();
+    });
+  }
+
+  // Blocked agents: re-read when they become blocked, then at most every 30 s while they stay blocked.
+  watchBlocked(list) {
+    const blocked = new Set(list.filter((x) => x.a.status === "blocked").map((x) => x.a.address));
+    for (const addr of blocked) this.readScreen(addr, this.wasBlocked?.has(addr) ? 30000 : 0);
+    for (const addr of this.screens.keys()) if (!list.some((x) => x.a.address === addr)) this.screens.delete(addr);
+    this.wasBlocked = blocked;
+  }
+
+  blockedLine(x) { return x.a.status === "blocked" ? this.screens.get(x.a.address)?.prompt || null : null; }
+
+  promptRow(t, text, size) {
+    return div().w_full().min_w(0).truncate().font_family(MONO).text_size(size).text_color(t.dim).child(text);
+  }
+
+  screenBox(t, lines) {
+    return v_flex().w_full().max_h(140).overflow_hidden().px(6).py(4).rounded(6).bg(t.background).border_1().border_color(t.border)
+      .font_family(MONO).text_size(10.5).text_color(t.dim)
+      .children(lines.map((l) => div().w_full().min_w(0).truncate().child(l)));
   }
 
   taskGlyph(t, r) {
@@ -921,6 +965,7 @@ export default class Maestro extends View {
       .when(Boolean(why) || running > 0, (el) => el.child(h_flex().gap(6).text_size(11)
         .when(Boolean(why), (e2) => e2.child(div().px(5).rounded(4).bg(t.blocked).text_color(t.background).child(why)))
         .when(running > 0, (e2) => e2.child(div().text_color(t.working).child(`${running} subagent${running > 1 ? "s" : ""} running`)))))
+      .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 10.5)))
       .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
   }
 
