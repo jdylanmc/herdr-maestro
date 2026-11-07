@@ -574,11 +574,70 @@ export default class Maestro extends View {
     }));
   }
 
+  // Worktree detail for the footer: changed files, diff size, short sha and main repo root (20 s cache).
+  gitDetail(cwd) {
+    if (!cwd) return null;
+    this.detail ??= new Map();
+    const d = this.detail.get(cwd);
+    if (!d?.busy && Date.now() - (d?.at ?? 0) > 20000) {
+      this.detail.set(cwd, { v: d?.v ?? null, at: d?.at ?? 0, busy: true });
+      this.cx?.spawn(async (cx) => {
+        let v = null;
+        try {
+          const git = (...args) => exec("git", ["-C", cwd, ...args]).then((r) => (r.code === 0 ? r.stdout : null)).catch(() => null);
+          const [roots, sha, stat, status] = await Promise.all([
+            git("rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"),
+            git("rev-parse", "--short", "HEAD"),
+            git("diff", "--shortstat", "HEAD"),
+            git("status", "--porcelain", "--untracked-files=all"),
+          ]);
+          if (roots != null) {
+            const [common, top] = roots.trim().split("\n");
+            const num = (re) => Number(re.exec(stat ?? "")?.[1] ?? 0);
+            v = {
+              project: common.replace(/[\\/]\.git[\\/]?$/, ""), top,
+              sha: sha?.trim() || null,
+              files: status == null ? null : status.split("\n").filter(Boolean).length,
+              added: num(/(\d+) insertion/), removed: num(/(\d+) deletion/),
+            };
+          }
+        } catch {}
+        this.detail.set(cwd, { v, at: Date.now(), busy: false });
+        cx.notify();
+      });
+    }
+    return d?.v ?? null;
+  }
+
+  // When Maestro last saw the session change: event times on first sight, then whenever its log or status line moves.
+  observed(x) {
+    this.seen ??= new Map();
+    const key = x.id ?? x.a.address;
+    const sig = `${x.id ? this.logs.get(x.id)?.offset ?? 0 : 0}|${x.snap?.cost?.total_duration_ms ?? ""}|${x.a.status}`;
+    const prev = this.seen.get(key);
+    if (prev?.sig === sig) return prev.at;
+    let at = Date.now();
+    if (!prev) {
+      const s = x.s;
+      const times = s ? [s.started, s.lastPromptAt, s.turnStart, s.error?.at, ...[...s.agents.values()].flatMap((g) => [g.started, g.ended]), ...[...s.schedules.values()].map((b) => b.lastRun)] : [];
+      const last = Math.max(0, ...times.filter(Number.isFinite));
+      if (last) at = last;
+    }
+    this.seen.set(key, { sig, at });
+    return at;
+  }
+
+  copy(cx, label, text) {
+    cx.write_to_clipboard(String(text));
+    notify({ title: "Copied", body: label, level: "success", timeout: 1500 });
+  }
+
   // Pinned card for the focused agent.
   footer(t, list, now) {
     const f = focused();
     const x = list.find((y) => y.a.address === f?.terminal) ?? list.find((y) => y.a.focused);
     if (!x) return div().size_full().bg(t.chrome);
+    this.refreshGit([x]);
     const { a, snap, s } = x;
     const sched = s ? [...s.schedules.values()] : [];
     const cost = snap?.cost;
@@ -587,8 +646,21 @@ export default class Maestro extends View {
     const ctx = snap?.context_window?.used_percentage;
     const up = cost?.total_duration_ms;
     const g = this.gitOf(x.cwd);
-    const kv = (k, v, mono = false) => v == null || v === "" ? null : v_flex().gap(0)
-      .child(div().text_size(11).text_color(t.dim).child(k))
+    const gd = this.gitDetail(x.cwd);
+    const tilde = (p) => (p ? p.replace(home(), "~") : null);
+    const branch = g?.branch ?? x.branch;
+    const added = gd ? gd.added : cost?.total_lines_added;
+    const removed = gd ? gd.removed : cost?.total_lines_removed;
+    const seen = new Date(this.observed(x));
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = `${seen.getFullYear()}-${pad(seen.getMonth() + 1)}-${pad(seen.getDate())} ${pad(seen.getHours())}:${pad(seen.getMinutes())}:${pad(seen.getSeconds())}`;
+    const field = (k, v, copyText = v, mono = true) => v == null || v === "" ? null : v_flex().gap(1)
+      .child(h_flex().gap(4).items_center()
+        .child(div().text_size(11).text_color(t.dim).child(k))
+        .child(div().id(`copy-${k}`).size(16).flex_none().flex().items_center().justify_center().rounded(4).text_color(t.dim)
+          .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(`Copy ${k.toLowerCase()}`)
+          .on_click((_e, cx) => this.copy(cx, k, copyText))
+          .child(svg("mods/maestro/copy.svg").size(11))))
       .child(div().truncate().text_size(12).text_color(t.foreground).when(mono, (el) => el.font_family(MONO)).child(String(v)));
     const petId = this.petOf(x)?.id;
     const cyclePet = () => {
@@ -597,6 +669,7 @@ export default class Maestro extends View {
       const i = ok.findIndex((p) => p.id === petId);
       setShared("maestro.pets", { ...(shared("maestro.pets") ?? {}), [x.tagKey]: ok[(i + 1) % ok.length].id });
     };
+    const metric = (v) => div().flex_1().min_w(0).truncate().child(v);
     return v_flex().id("maestro-footer").size_full().min_h(0).overflow_y_scrollbar().px(12).pt(10).pb(10).gap(8).bg(t.chrome)
       .child(h_flex().gap(12).items_center()
         .child(div().id("pet-box").size(64).flex_none().rounded(10).border_1().border_color(t.border).bg(t.surface).flex().items_center().justify_center()
@@ -606,17 +679,17 @@ export default class Maestro extends View {
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().truncate().text_size(14).font_semibold().child(this.title(x)))
           .child(h_flex().gap(6).items_center().child(this.statusGlyph(t, x, 11))
-            .child(div().truncate().text_size(12).text_color(t.muted).child([STATUS_WORD[x.failed ? "failed" : a.status], a.address, a.parent ? `child of ${a.parent}` : null].filter(Boolean).join(" · "))))
+            .child(div().truncate().text_size(12).text_color(t.muted).child(`${STATUS_WORD[x.failed ? "failed" : a.status]} · ${a.address}`)))
           .when(Boolean(model), (el) => el.child(div().truncate().text_size(12).text_color(t.dim).child(effort && !model.includes(" · ") ? `${model} · ${effort}` : model)))))
-      .child(h_flex().gap(8).text_size(11.5).text_color(t.muted)
-        .child(div().child(ctx != null ? `${ctx}% context` : ""))
-        .child(div().flex_1().text_center().child(up != null ? `${ago(up)} elapsed` : ""))
-        .when(Boolean(cost), (el) => el.child(h_flex().gap(4)
-          .child(div().child(`${snap.ai_used?.formatted ?? "?"} AIC`))
-          .child(div().text_color(t.ansi2 ?? t.done).child(`+${cost.total_lines_added ?? 0}`))
-          .child(div().text_color(t.ansi1 ?? t.blocked).child(`−${cost.total_lines_removed ?? 0}`)))))
+      .child(h_flex().gap(8).items_center().text_size(11.5).text_color(t.muted)
+        .child(metric(ctx != null ? `${ctx}% context${snap?.ai_used?.formatted ? ` · ${snap.ai_used.formatted} AIC` : ""}` : snap?.ai_used?.formatted ? `${snap.ai_used.formatted} AIC` : "—"))
+        .child(metric(up != null ? `${ago(up)} elapsed` : "—").text_center())
+        .child(h_flex().flex_1().min_w(0).justify_end().gap(4)
+          .when(gd?.files != null, (el) => el.child(div().child(`${gd.files} file${gd.files === 1 ? "" : "s"}`)))
+          .when(added != null, (el) => el.child(div().text_color(t.ansi2 ?? t.done).child(`+${added}`)))
+          .when(removed != null, (el) => el.child(div().text_color(t.ansi1 ?? t.blocked).child(`−${removed}`)))))
       .child(div().truncate().text_size(11).font_family(MONO).text_color(t.dim)
-        .child([g?.branch ?? x.branch, x.cwd ? x.cwd.replace(home(), "~") : null].filter(Boolean).join(" · ")))
+        .child([branch === "HEAD" ? "Detached HEAD" : branch, gd?.sha, tilde(x.cwd)].filter(Boolean).join(" · ")))
       .child(h_flex().gap(4).items_center()
         .child(this.tagChips(t, [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))]))
         .child(div().id("edit-tags").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
@@ -633,7 +706,13 @@ export default class Maestro extends View {
             setShared("maestro.preview", p);
           })
           .child((shared("maestro.preview") ?? {})[a.address] ? `mood: ${(shared("maestro.preview") ?? {})[a.address]}` : "Moods…")))
-      .children([kv("Session ID", x.id, true)].filter(Boolean))
+      .children([
+        field("Session ID", x.id),
+        field("Observed", `${stamp} · ${ago(now - seen.getTime())} ago`, stamp, false),
+        field("Workspace path", tilde(x.cwd), x.cwd),
+        field("Project path", tilde(gd?.project ?? g?.top), gd?.project ?? g?.top),
+        field("Terminal", a.parent ? `${a.address} · child of ${a.parent}` : a.address, a.address),
+      ].filter(Boolean))
       .when(sched.length > 0, (el) => el.child(v_flex().gap(2)
         .child(div().text_size(11).text_color(t.dim).child(`Beats ${sched.length}`))
         .children(sched.map((b) => {
