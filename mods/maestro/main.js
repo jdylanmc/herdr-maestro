@@ -4,7 +4,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand } from "herdr";
+import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
@@ -79,6 +79,24 @@ function ago(ms) {
   return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
 }
 
+// Board or pokedex as a mod pane: its own tab, or split beside the focused pane. props.place marks it.
+function openModPane(mod, name, extra, how) {
+  const props = { ...extra, place: "pane" };
+  if (how === "tab") { run("tab.new", { name, mod, props }); return; }
+  const f = focused();
+  const pane = f?.pane ?? panes().find((p) => p.tab === f?.tab && p.focused)?.pane ?? panes().find((p) => p.tab === f?.tab)?.pane;
+  run("pane.split", { direction: "right", mod, props, ...(pane ? { pane } : {}) });
+}
+
+// Pane controls let the native press focus their host before the click closes it.
+function closeModPane(mod) {
+  const all = panes();
+  const p = all.find((q) => q.pane === focused()?.pane && q.mod === mod && q.terminal == null);
+  if (!p) return;
+  if (all.filter((q) => q.tab === p.tab).length === 1) run("tab.close", { id: p.tab });
+  else run("pane.close", { pane: p.pane });
+}
+
 export default class Maestro extends View {
   init(_props, cx) {
     this.snaps = new Map();     // terminal address -> status-line payload
@@ -86,10 +104,13 @@ export default class Maestro extends View {
     this.logs = new Map();      // session id -> { s, offset, path, busy }
     this.collapsed = new Set(); // terminal addresses whose subagent tree is folded
     this.records = new Map();   // terminal address -> agent-written record (parent, tags, mood, name)
-    this.view = props()?.view ?? "list"; // list (sidebar), footer (focused agent), board (window)
+    this.view = props()?.view ?? "list"; // list (sidebar), footer (focused agent), board (window), themes (popup)
     this.board = this.view === "board";
     this.primary = this.view === "list";
+    this.kbToken = shared("maestro.kbFocus");
     this.cx = cx;
+    this.handle = cx.focus_handle();
+    if (this.view === "themes") { this.handle.focus(); cx.timer.after(400, () => this.handle.focus()); return; }
     this.folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
     this.git = new Map();       // folder -> { v: { repo, top, branch, tree }, at }
     this.pets = [];             // rendered pets (data/maestro/pets/index.json)
@@ -113,6 +134,16 @@ export default class Maestro extends View {
         if (c === "board") this.openBoard();
         else if (c === "tags") this.openTags();
         else if (c === "pets") this.openPets();
+        else if (c === "focus") await this.keyboard(cx);
+        cx.notify();
+      }
+    });
+    else cx.spawn(async (cx) => {
+      // Only "focus" (pane.go onto this copy, mod.json "focusable"); the list owns key commands.
+      for (;;) {
+        if ((await nextCommand()) !== "focus") continue;
+        if (this.view === "footer") setShared("maestro.kbFocus", Date.now());
+        else this.handle.focus();
         cx.notify();
       }
     });
@@ -316,12 +347,15 @@ export default class Maestro extends View {
   // ---- Hierarchy: space -> worktree -> agent -> internal tasks and workers ----
   render(cx) {
     const t = theme();
+    if (this.view === "themes") return this.renderThemes(t);
     const now = Date.now();
     const list = this.sessions();
     if (this.view !== "footer") this.watchBlocked(list);
     if (this.board) return this.renderBoard(t, list, now);
     if (this.view === "footer") return this.footer(t, list, now);
     this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()) }))]);
+    this.keyboardState();
+    this.nav = [];
     const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
     const hide = shared("maestro.hideFinished") ?? {};
     const every = new Map(list.map((x) => [x.a.address, x]));
@@ -346,8 +380,9 @@ export default class Maestro extends View {
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
     for (const { sp, tree } of this.nestedSpaces()) {
       const mine = roots.filter((x) => x.a.space === sp.id);
-      if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.railSpace(t, sp, mine)); continue; }
-      rows.push(this.spaceRow(t, sp, mine, kidsOf, tree));
+      this.nav.push({ key: `sp:${sp.id}`, space: sp });
+      if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.navRow(t, `sp:${sp.id}`, this.railSpace(t, sp, mine))); continue; }
+      rows.push(this.navRow(t, `sp:${sp.id}`, this.spaceRow(t, sp, mine, kidsOf, tree), { top: 6, bottom: 5 }));
       if (this.folded.has(`sp:${sp.id}`)) {
         if (mine.length) rows.push(this.iconCard(t, `sp:${sp.id}`, this.flat(mine, kidsOf)));
         for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
@@ -369,19 +404,22 @@ export default class Maestro extends View {
         const fid = `wt:${sp.id}:${k}`;
         const sorted = tr.items.sort(urgent);
         const group = [];
+        const at = this.nav.length;
         if (this.folded.has(fid)) { group.push(this.iconCard(t, fid, this.flat(sorted, kidsOf))); for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address)); }
         else for (const x of sorted) this.pushAgent(t, group, order, x, kidsOf, now, 0);
-        rows.push(this.treeRow(t, fid, tr, kidsOf));
+        this.nav.splice(at, 0, { key: fid });
+        rows.push(this.navRow(t, fid, this.treeRow(t, fid, tr, kidsOf), { top: 4 }));
         rows.push(this.guide(t, `g-${fid}`, 9, group));
       }
     }
     setAgentOrder(order);
+    if (this.kb && !this.nav.some((n) => n.key === this.cursor)) this.cursor = this.nav[0]?.key ?? null;
     const counts = { blocked: 0, working: 0 };
     for (const x of list) if (counts[x.a.status] != null) counts[x.a.status]++;
     const icon = (id, name, tip, on) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_click(on)
-      .child(svg(`mods/workspace-chrome/${name}.svg`).size(14));
-    return v_flex().id("maestro").size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
+      .child(svg(name.includes("/") ? name : `mods/workspace-chrome/${name}.svg`).size(14));
+    return v_flex().id("maestro").when(this.kb, (el) => el.track_focus(this.handle).on_key_down((e, cx) => this.navKey(e, cx))).size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .when(!narrow, (el) => el.child(h_flex().pl(14).pr(8).pt(4).pb(6).gap(2).items_center()
         .child(div().text_size(15).font_semibold().child("Maestro"))
         .child(div().w(8))
@@ -389,6 +427,7 @@ export default class Maestro extends View {
         .child(div().flex_1())
         .child(icon("m-new", "folder-plus", "New space", () => run("space.new")))
         .child(icon("m-finished", shared("maestro.showFinished") ? "circle-check" : "clock", shared("maestro.showFinished") ? "Showing finished tasks for 24 h" : "Finished tasks hide after 10 min", () => setShared("maestro.showFinished", !shared("maestro.showFinished"))))
+        .child(icon("m-theme", "mods/maestro/palette.svg", "Theme", () => this.openThemes()))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .when(!narrow, (el) => el.child(this.segments(t, proj)))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 6).pb(8).overflow_y_scrollbar().mode("always")
@@ -583,7 +622,8 @@ export default class Maestro extends View {
     order.push(x.a.address);
     const tasks = x.s ? treeRows(x.s, now, keepMs()) : [];
     const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
-    rows.push(this.agentCard(t, x, now, depth));
+    this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
+    rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 2, bottom: 2 }));
     if (tasks.length) {
       const tid = `tasks:${x.a.address}`;
       const open = !this.folded.has(tid);
@@ -999,14 +1039,15 @@ export default class Maestro extends View {
 
   renderBoard(t, list, now) {
     const cols = BOARD.map((c) => ({ ...c, items: list.filter((x) => this.boardColumn(x) === c.id) }));
-    return v_flex().id("maestro-board").size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
+    return v_flex().id("maestro-board").track_focus(this.handle).on_key_down((e, cx) => { if (e.key === "escape" && props()?.place !== "pane") { this.dismissBoard(); cx.stop_propagation(); } }).size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
       .child(h_flex().px(16).py(12).gap(10).items_center().bg(t.chrome)
         .child(div().text_size(16).child("Maestro board"))
         .child(div().text_color(t.dim).child(`${list.length} sessions`))
         .child(div().flex_1())
+        .child(this.paneButtons(t, "board", "maestro", "Maestro board", { view: "board" }))
         .child(div().id("board-close").px(8).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click(() => (props()?.overlay ? closeOverlay(props().overlay) : run("layout.select", { stack: "work-stack", child: "main" }))).child("×")))
+          .on_mouse_down("left", (_e, cx) => { if (props()?.place !== "pane") cx.stop_propagation(); })
+          .on_click(() => this.dismissBoard()).child("×")))
       .child(h_flex().id("board-cols").flex_1().min_h(0).p(12).gap(10).items_start().children(cols.map((c) =>
         v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(8).gap(8).rounded(10).bg(t.chrome).overflow_y_scrollbar()
           .child(h_flex().gap(6).items_center().pb(2)
@@ -1035,4 +1076,131 @@ export default class Maestro extends View {
       .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)));
   }
 
+  // ---- Board as a tab or split (mod panes) ----
+  paneButtons(t, id, mod, name, extra) {
+    const btn = (bid, label, tip, how) => div().id(`${id}-${bid}`).px(8).py(2).rounded(5).text_size(12).text_color(t.dim)
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click(() => { openModPane(mod, name, extra, how); this.leaveShownView(); })
+      .child(label);
+    return h_flex().gap(2).items_center()
+      .child(btn("tab", "Open as tab", "Open in a new tab of this space", "tab"))
+      .child(btn("split", "Split beside", "Open in a pane beside the focused one", "split"));
+  }
+
+  // The stack or window this view came from gives the main area back after opening it as a pane.
+  leaveShownView() {
+    if (props()?.overlay) closeOverlay(props().overlay);
+    else if (props()?.place !== "pane" && find(layout(), "work-stack")?.active !== "main") run("layout.select", { stack: "work-stack", child: "main" });
+  }
+
+  dismissBoard() {
+    if (props()?.overlay) closeOverlay(props().overlay);
+    else if (props()?.place === "pane") closeModPane("maestro");
+    else run("layout.select", { stack: "work-stack", child: "main" });
+  }
+
+  // ---- Keyboard navigation in the sidebar (mod.json "focusable": pane.go, or the footer's hand-off) ----
+  // The list tracks keyboard focus only while navigating, so mouse clicks keep their old behavior.
+  async keyboard(cx) {
+    this.kb = true;
+    this.kbSeen = false;
+    const f = focused();
+    if (!this.nav?.some((n) => n.key === this.cursor)) this.cursor = f?.terminal && this.nav?.some((n) => n.key === `ag:${f.terminal}`) ? `ag:${f.terminal}` : this.nav?.[0]?.key ?? null;
+    this.handle.focus();
+    cx.notify();
+    await cx.sleep(60);
+    this.handle.focus();
+    await cx.sleep(400);
+    if (!this.handle.is_focused() && !this.kbSeen) this.kb = false;
+  }
+
+  keyboardState() {
+    const token = shared("maestro.kbFocus");
+    if (this.primary && token !== this.kbToken) {
+      this.kbToken = token;
+      if (token) this.cx?.spawn(async (cx) => { await this.keyboard(cx); cx.notify(); });
+    }
+    if (!this.kb) return;
+    if (this.handle.is_focused()) this.kbSeen = true;
+    else if (this.kbSeen) this.kb = false;
+  }
+
+  navRow(t, key, el, at = {}) {
+    if (!this.kb) return el;
+    return v_flex().flex_none().relative().child(el)
+      .when(this.cursor === key, (w) => w.child(div().absolute().left(at.left ?? 0).right(at.right ?? 0).top(at.top ?? 0).bottom(at.bottom ?? 0)
+        .rounded(8).border_1().border_color(t.accent)));
+  }
+
+  navKey(e, cx) {
+    const nav = this.nav ?? [];
+    let i = nav.findIndex((n) => n.key === this.cursor);
+    const cur = nav[i];
+    const k = e.key;
+    if (k === "escape") { this.kb = false; run("pane.go", { direction: "right" }); }
+    else if (k === "down" || k === "up") {
+      if (!nav.length) return;
+      i = i < 0 ? 0 : (i + (k === "down" ? 1 : nav.length - 1)) % nav.length;
+      this.cursor = nav[i].key;
+    } else if (k === "enter") {
+      if (!cur) return;
+      if (cur.x) { this.kb = false; this.focus(cur.x); }
+      else if (cur.space) run("space.select", { id: cur.space.id });
+      else this.fold(cur.key, cx);
+    } else if (k === "space" || k === "left" || k === "right") {
+      const id = cur?.x ? cur.tasks : cur?.key;
+      if (!id) return;
+      if (k === "space" || (k === "left") !== this.folded.has(id)) this.fold(id, cx);
+    } else return;
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  // ---- Theme picker: a popup over themes(); app.theme sets the shown layout's theme for that lightness ----
+  openThemes() {
+    openOverlay({ kind: "popup", mod: "maestro", props: { view: "themes" }, width: 320, height: 460, at: "pointer" });
+  }
+
+  pickTheme(name) {
+    run("app.theme", { name });
+    if (props()?.overlay) closeOverlay(props().overlay);
+  }
+
+  renderThemes(t) {
+    const all = themes();
+    const list = [...all.filter((th) => !th.light), ...all.filter((th) => th.light)];
+    const now = list.find((th) => th.colors?.background === t.background && th.colors?.foreground === t.foreground)?.name ?? null;
+    if (this.themeAt == null) this.themeAt = Math.max(0, list.findIndex((th) => th.name === now));
+    this.themeAt = Math.min(this.themeAt, list.length - 1);
+    const swatch = (c) => div().size(12).flex_none().rounded(3).border_1().border_color(t.border).bg(c ?? t.surface);
+    const row = (th, i) => {
+      const c = th.colors ?? {};
+      return h_flex().id(`theme-${th.name}`).px(8).py(5).gap(8).items_center().rounded(6).flex_none()
+        .when(i === this.themeAt, (el) => el.bg(t.selected))
+        .hover((st) => st.bg(i === this.themeAt ? t.selected : t.hover))
+        .on_click(() => this.pickTheme(th.name))
+        .child(h_flex().gap(2).flex_none().children(["background", "foreground", "accent", "ansi1", "ansi2", "ansi4", "ansi5"].map((k) => swatch(c[k]))))
+        .child(div().flex_1().min_w(0).truncate().text_size(12.5).child(th.name))
+        .when(th.name === now, (el) => el.child(div().text_size(11).text_color(t.accent).child("✓")));
+    };
+    const head = (label) => div().px(8).pt(6).pb(2).text_size(11).text_color(t.dim).child(label);
+    const dark = list.filter((th) => !th.light);
+    return v_flex().id("maestro-themes").track_focus(this.handle).size_full().min_h(0).p(8).gap(2).bg(t.popover ?? t.raised).text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") closeOverlay(props().overlay);
+        else if (e.key === "down") this.themeAt = (this.themeAt + 1) % list.length;
+        else if (e.key === "up") this.themeAt = (this.themeAt + list.length - 1) % list.length;
+        else if (e.key === "enter") { if (list[this.themeAt]) this.pickTheme(list[this.themeAt].name); }
+        else return;
+        cx.stop_propagation();
+        cx.notify();
+      })
+      .child(div().px(8).pb(4).text_size(11).text_color(t.muted).whitespace_normal().child("Sets this layout's theme for that appearance (dark or light)."))
+      .child(v_flex().id("themes-list").flex_1().min_h(0).overflow_y_scrollbar().gap(1)
+        .when(dark.length > 0, (el) => el.child(head("Dark")))
+        .children(dark.map((th, i) => row(th, i)))
+        .when(list.length > dark.length, (el) => el.child(head("Light")))
+        .children(list.slice(dark.length).map((th, i) => row(th, dark.length + i))));
+  }
 }
