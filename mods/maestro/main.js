@@ -4,11 +4,12 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes } from "herdr";
+import { agents, terminals, panes, spaces, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
 import { liveAgents } from "./live.js";
+import { pinFirst, alertStep, NEEDS_YOU } from "./alerts.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 import { nestSpaces, spacePlace } from "./wtlib.js";
 
@@ -148,6 +149,7 @@ export default class Maestro extends View {
       }
     });
     cx.timer.every(3000, (cx) => cx.spawn(async (cx) => { await this.tailAll(); cx.notify(); }));
+    if (this.primary) { this.alertMem = new Map(); cx.timer.every(1000, () => this.alertTick()); }
     cx.timer.every(15000, (cx) => cx.spawn(async (cx) => { await this.bindByAncestry(); await this.tailAll(); cx.notify(); }));
   }
 
@@ -374,7 +376,7 @@ export default class Maestro extends View {
       nested.add(x.a.address);
     }
     const roots = shown.filter((x) => !nested.has(x.a.address));
-    const urgent = (p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.seq - q.a.seq;
+    const urgent = (p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.seq - q.a.seq;
     const order = [];
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
@@ -426,6 +428,7 @@ export default class Maestro extends View {
         .when(counts.blocked > 0, (e) => e.child(div().px(6).rounded(5).text_size(10.5).font_semibold().bg(t.blocked + "26").text_color(t.blocked).child(`${counts.blocked} need you`)))
         .child(div().flex_1())
         .child(icon("m-new", "folder-plus", "New space", () => run("space.new")))
+        .child(this.alertToggles(t))
         .child(icon("m-finished", shared("maestro.showFinished") ? "circle-check" : "clock", shared("maestro.showFinished") ? "Showing finished tasks for 24 h" : "Finished tasks hide after 10 min", () => setShared("maestro.showFinished", !shared("maestro.showFinished"))))
         .child(icon("m-theme", "mods/maestro/palette.svg", "Theme", () => this.openThemes()))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
@@ -445,6 +448,67 @@ export default class Maestro extends View {
         .when(p.id !== proj, (el) => el.text_color(t.dim).hover((st) => st.text_color(t.foreground)))
         .on_click(() => setShared("maestro.projection", p.id))
         .child(p.label)));
+  }
+
+  // Opt-in chime and worker-tab settling; right-click the bell for Herdr's own alert settings.
+  alertToggles(t) {
+    const sounds = Boolean(shared("maestro.sounds"));
+    const settle = Boolean(shared("maestro.autoSettle"));
+    const toggle = (id, on, tip, child, click, right) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
+      .text_color(on ? t.accent : t.dim).hover((st) => st.bg(t.hover).text_color(on ? t.accent : t.foreground)).tooltip(tip).on_click(click)
+      .when(Boolean(right), (el) => el.on_mouse_down("right", right)).child(child);
+    return h_flex().flex_none().gap(2)
+      .child(toggle("m-sounds", sounds, `${sounds ? "Chiming" : "Chime"} when an agent starts needing you and Herdr's own sound doesn't (right-click: Herdr's alert settings)`,
+        div().font_family(NERD).text_size(14).child(sounds ? "\u{F0F3}" : "\u{F1F6}"),
+        () => setShared("maestro.sounds", !sounds), () => run("app.settings", { section: "alerts" })))
+      .child(toggle("m-settle", settle, settle ? "Settling finished workers' tabs (tab.next/prev skip them)" : "Settle a Maestro worker's tab when it finishes",
+        svg("mods/workspace-chrome/archive.svg").size(14), () => setShared("maestro.autoSettle", !settle)));
+  }
+
+  // Primary view only: chime once per transition into needing you, settle or unsettle workers' tabs.
+  alertTick() {
+    const sounds = Boolean(shared("maestro.sounds"));
+    const settle = Boolean(shared("maestro.autoSettle"));
+    if (!sounds && !settle) { this.alertMem.clear(); return; }
+    const tabs = new Map(spaces().flatMap((sp) => sp.tabs ?? []).map((tb) => [tb.id, tb]));
+    const labels = new Map(terminals().map((k) => [k.address, k.labels ?? {}]));
+    const herdrSounds = settings()?.sounds?.enabled !== false;
+    const items = this.sessions().map((x) => ({
+      address: x.a.address,
+      tab: x.a.pane ? x.a.tab ?? null : null,
+      status: x.a.status,
+      failed: x.failed,
+      needs: x.a.status === "blocked" || NEEDS_YOU.has(x.s ? attention(x.s) : null),
+      herdrChimes: herdrSounds && Boolean(x.a.pane) && x.a.status === "blocked",
+      worker: Boolean(x.rec.launcher ?? labels.get(x.a.address)?.["maestro.parent"]),
+      tabSettled: Boolean(tabs.get(x.a.tab)?.settled),
+      tabPanes: tabs.get(x.a.tab)?.panes,
+    }));
+    for (const act of alertStep(this.alertMem, items, Date.now(), { sounds, settle, debounceMs: 2500 })) {
+      try {
+        if (act.type === "sound") playSound("blocked");
+        else run(act.type === "settle" ? "tab.settle" : "tab.unsettle", { id: act.tab });
+      } catch {}
+    }
+  }
+
+  newInFolder(sp) {
+    this.cx?.spawn(async () => {
+      let folder = null;
+      try { folder = await pickFolder({ prompt: "Start Copilot" }); } catch {}
+      if (folder) run("tab.new", { space: sp.id, folder, argv: copilotArgv() });
+    });
+  }
+
+  // Pin toggle while the card is hovered (Herdr's terminal.pin, shared with its agent list); a pin glyph otherwise.
+  pinControl(t, x) {
+    const pinned = Boolean(x.a.pinned);
+    if (this.hovered !== x.a.address) return pinned ? svg("mods/workspace-chrome/pin.svg").size(11).flex_none().text_color(t.dim) : div();
+    return div().id(`pin-${x.a.address}`).flex_none().p(2).rounded(4).text_color(t.dim).cursor_pointer()
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(pinned ? "Unpin" : "Pin to the top")
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { cx.stop_propagation(); run("terminal.pin", { terminal: x.a.address, pinned: !pinned }); this.hovered = null; cx.notify(); })
+      .child(svg(`mods/workspace-chrome/${pinned ? "pin-off" : "pin"}.svg`).size(13));
   }
 
   // Cards of one group hang off a vertical outline line.
@@ -538,7 +602,8 @@ export default class Maestro extends View {
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
       .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: copilotArgv() }),
-        svg("mods/workspace-chrome/plus.svg").size(13))))
+        svg("mods/workspace-chrome/plus.svg").size(13)))
+      .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
   }
@@ -621,7 +686,7 @@ export default class Maestro extends View {
   pushAgent(t, rows, order, x, kidsOf, now, depth) {
     order.push(x.a.address);
     const tasks = x.s ? treeRows(x.s, now, keepMs()) : [];
-    const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
+    const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
     rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 2, bottom: 2 }));
     if (tasks.length) {
@@ -686,7 +751,8 @@ export default class Maestro extends View {
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(h_flex().gap(6).items_center()
           .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(this.title(x)))
-          .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags))))
+          .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
+          .child(this.pinControl(t, x)))
         .child(h_flex().gap(6).items_center()
           .child(this.statusGlyph(t, x, 12))
           .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(asks ? t.foreground : why ? t.blocked : t.muted).child(line || "—"))
@@ -698,6 +764,7 @@ export default class Maestro extends View {
       .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
       .child(this.pet(x, 26));
     return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
+      .on_hover((on, cx) => { if (on) this.hovered = a.address; else if (this.hovered === a.address) this.hovered = null; cx.notify(); })
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
       .child(div().flex_1().min_w(0)
         .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("left_center")

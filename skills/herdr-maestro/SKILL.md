@@ -28,6 +28,7 @@ everything in the Maestro layout (`cmd-shift-m`).
 | `maestro tag add\|rm\|set\|ls [tags]` | This agent's own tags (shown as `tag·agent`), normalized to slugs (`a-z0-9-`, ≤ 24 chars, ≤ 8). `ls` prints `{tag, color}`; colors are picked only by the human. |
 | `maestro mood <happy\|focused\|thinking\|proud\|confused\|stuck\|sleepy\|celebrating\|clear>` | This agent's mood glyph. |
 | `maestro name <short>` | Short label shown beside this agent. |
+| `maestro pin [on\|off]` | Pin this agent to the top of Herdr's and Maestro's agent lists (`terminal.pin`; ends with the terminal). |
 | `maestro icon <preset\|glyph> [color]` | This agent's icon: a preset (`robot`, `code`, `bug`, `eye`, `shield`, `compass`, `brush`, …) or one Nerd Font glyph; color is a theme color name (`ansi1`–`ansi6`, `accent`) so it follows the Herdr theme, or `#rrggbb`. |
 | `maestro pet ls` | Pets you can pick; yours is marked `mine`, the human's default `default`. |
 | `maestro pet use <id\|clear>` | Choose this session's pet in Maestro (kept across restarts and resumes). |
