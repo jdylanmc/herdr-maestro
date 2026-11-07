@@ -81,14 +81,14 @@ test("failed remote work releases its guard and reports the failure for retry", 
   assert.equal(notifications, 2);
 });
 
-test("remote passes also cover agents identified by their space's machine", async () => {
+test("remote tails preserve the space-machine fallback without treating bare addresses as remote hc targets", async () => {
   const v = view();
   const calls = [];
   v.live = () => [{ address: "t1", space: "box/s1" }];
   v.machineFor = () => "box";
-  v.loadRemoteSnaps = async (on) => { calls.push(`snaps:${on}`); };
-  v.bindRemote = async (on) => { calls.push(`bind:${on}`); };
-  v.tailAll = async (on) => { calls.push(`tail:${on}`); };
+  v.snaps.set("t1", { session_id: "remote" });
+  v.remoteInfo = () => { throw new Error("bare addresses must not use remote binding or snapshot reads"); };
+  v.tail = async (id, on) => { calls.push([id, on]); };
   await v.refreshRemote({ notify() {} });
-  assert.deepEqual(calls, ["snaps:box", "bind:box", "tail:box"]);
+  assert.deepEqual(calls, [["remote", "box"]]);
 });

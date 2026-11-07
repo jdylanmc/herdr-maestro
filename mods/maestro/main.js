@@ -336,7 +336,7 @@ export default class Maestro extends View {
 
   // Remote status-line snapshots, when the bridge runs there too (keyed by its local address).
   async loadRemoteSnaps(machine) {
-    const live = this.live().filter((a) => this.machineFor(a) === machine);
+    const live = this.live().filter((a) => machineOf(a.address) === machine);
     const keep = new Set(live.map((a) => a.address));
     for (const k of [...this.snaps.keys()]) if (machineOf(k) === machine && !keep.has(k)) this.snaps.delete(k);
     await Promise.all(live.map(async (a) => {
@@ -373,8 +373,8 @@ export default class Maestro extends View {
   async bindRemote(machine) {
     const by = new Map();
     for (const a of this.live()) {
-      const on = this.machineFor(a);
-      if (on !== machine || this.snaps.get(a.address)?.session_id || this.fallback.has(a.address)) continue;
+      const on = machineOf(a.address);
+      if (!on || on !== machine || this.snaps.get(a.address)?.session_id || this.fallback.has(a.address)) continue;
       if (!by.has(on)) by.set(on, []);
       by.get(on).push(a);
     }
