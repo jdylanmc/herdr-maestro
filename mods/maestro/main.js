@@ -522,13 +522,13 @@ export default class Maestro extends View {
     for (const { sp, tree } of this.nestedSpaces()) {
       if (sp.header) {
         this.nav.push({ key: sp.id });
-        rows.push(this.navRow(t, sp.id, this.machineHeader(t, sp, roots, kidsOf, order, narrow), { top: 8 }));
+        rows.push(this.navRow(t, sp.id, this.machineHeader(t, sp, roots, kidsOf, order, narrow), { top: 4 }));
         continue;
       }
       const mine = roots.filter((x) => x.a.space === sp.id);
       this.nav.push({ key: `sp:${sp.id}`, space: sp });
       if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.navRow(t, `sp:${sp.id}`, this.railSpace(t, sp, mine))); continue; }
-      rows.push(this.navRow(t, `sp:${sp.id}`, this.spaceRow(t, sp, mine, kidsOf, tree), { top: 6, bottom: 5 }));
+      rows.push(this.navRow(t, `sp:${sp.id}`, this.spaceRow(t, sp, mine, kidsOf, tree), { top: 3, bottom: 3 }));
       if (this.folded.has(`sp:${sp.id}`)) {
         for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
         continue;
@@ -553,7 +553,7 @@ export default class Maestro extends View {
         if (this.folded.has(fid)) for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address));
         else for (const x of sorted) this.pushAgent(t, group, order, x, kidsOf, now, 0);
         this.nav.splice(at, 0, { key: fid });
-        rows.push(this.navRow(t, fid, this.treeRow(t, fid, tr, kidsOf), { top: 4 }));
+        rows.push(this.navRow(t, fid, this.treeRow(t, fid, tr, kidsOf), { top: 2 }));
         if (group.length) rows.push(this.guide(t, `g-${fid}`, 9, group));
       }
     }
@@ -561,13 +561,13 @@ export default class Maestro extends View {
     if (this.kb && !this.nav.some((n) => n.key === this.cursor)) this.cursor = this.nav[0]?.key ?? null;
     const counts = { blocked: 0, working: 0 };
     for (const x of list) if (counts[x.a.status] != null) counts[x.a.status]++;
-    const icon = (id, name, tip, on) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
+    const icon = (id, name, tip, on) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_click(on)
       .child(svg(name.includes("/") ? name : `mods/workspace-chrome/${name}.svg`).size(14));
     return v_flex().id("maestro").when(this.kb, (el) => el.track_focus(this.handle).on_key_down((e, cx) => this.navKey(e, cx))).size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
-      .when(!narrow, (el) => el.child(h_flex().pl(14).pr(8).pt(4).pb(6).gap(2).items_center()
+      .when(!narrow, (el) => el.child(h_flex().pl(12).pr(6).pt(2).pb(4).gap(2).items_center()
         .child(div().text_size(15).font_semibold().child("Maestro"))
-        .child(div().w(8))
+        .child(div().w(6))
         .when(counts.blocked > 0, (e) => e.child(div().px(6).rounded(5).text_size(10.5).font_semibold().bg(t.blocked + "26").text_color(t.blocked).child(`${counts.blocked} need you`)))
         .child(div().flex_1())
         .child(icon("m-new", "folder-plus", "New space", () => run("space.new")))
@@ -576,7 +576,7 @@ export default class Maestro extends View {
         .child(icon("m-theme", "mods/maestro/palette.svg", "Theme", () => this.openThemes()))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .when(!narrow, (el) => el.child(this.segments(t, proj)))
-      .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 6).pb(8).overflow_y_scrollbar().mode("always")
+      .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 4).pb(6).overflow_y_scrollbar().mode("always")
         .when(spaces().length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No spaces yet.")))
         .children(rows))
       .when(!narrow, (el) => el.child(this.attentionStrip(t, list)));
@@ -584,7 +584,7 @@ export default class Maestro extends View {
 
   // Projection switch: Worktrees | Sub-agents | Workspace, shared across views.
   segments(t, proj) {
-    return h_flex().id("m-proj").mx(10).mb(6).p(2).h(28).flex_none().gap(2).rounded(7).bg(t.surface).border_1().border_color(t.border)
+    return h_flex().id("m-proj").mx(8).mb(4).p(2).h(24).flex_none().gap(2).rounded(7).bg(t.surface).border_1().border_color(t.border)
       .children(PROJECTIONS.map((p) => div().id(`proj-${p.id}`).flex_1().h_full().flex().items_center().justify_center().rounded(5)
         .text_size(12).font_medium().cursor_pointer()
         .when(p.id === proj, (el) => el.bg(t.raised).text_color(t.foreground))
@@ -597,7 +597,7 @@ export default class Maestro extends View {
   alertToggles(t) {
     const sounds = Boolean(shared("maestro.sounds"));
     const settle = Boolean(shared("maestro.autoSettle"));
-    const toggle = (id, on, tip, child, click, right) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6)
+    const toggle = (id, on, tip, child, click, right) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(on ? t.accent : t.dim).hover((st) => st.bg(t.hover).text_color(on ? t.accent : t.foreground)).tooltip(tip).on_click(click)
       .when(Boolean(right), (el) => el.on_mouse_down("right", right)).child(child);
     return h_flex().flex_none().gap(2)
@@ -664,12 +664,12 @@ export default class Maestro extends View {
     const waiting = list.filter((x) => x.a.status === "blocked").map((x) => ({ x, why: x.kind ?? (x.s ? attention(x.s) : null) }));
     if (!waiting.length) return div();
     const title = waiting.every((w) => w.why === "question") ? "Quick question" : "Waiting on you";
-    return v_flex().id("m-attn").flex_none().max_h(180).overflow_y_scrollbar().px(8).pt(6).pb(6).gap(2).border_t(1).border_color(t.border)
+    return v_flex().id("m-attn").flex_none().max_h(180).overflow_y_scrollbar().px(6).pt(4).pb(4).gap(1).border_t(1).border_color(t.border)
       .child(h_flex().px(4).pb(2).gap(6).items_center()
         .child(div().size(7).rounded(4).bg(t.blocked))
         .child(div().text_size(12).font_semibold().text_color(t.blocked).child(title))
         .child(div().text_size(11).text_color(t.dim).child(String(waiting.length))))
-      .children(waiting.map(({ x, why }) => h_flex().id(`attn-${x.a.address}`).px(4).py(3).gap(8).items_center().rounded(6)
+      .children(waiting.map(({ x, why }) => h_flex().id(`attn-${x.a.address}`).px(4).py(2).gap(6).items_center().rounded(6)
         .hover((st) => st.bg(t.hover)).on_click(() => this.focus(x)).tooltip(this.task(x) || this.title(x))
         .child(this.icon(t, x, 15))
         .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_medium().child(this.title(x)))
@@ -743,12 +743,12 @@ export default class Maestro extends View {
     const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color] ?? t.accent);
     const hidden = Boolean((shared("maestro.hideFinished") ?? {})[sp.id]);
     const stop = (_e, cx) => cx.stop_propagation();
-    const btn = (id, tip, on, child) => div().id(`${id}-${sp.id}`).size(22).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+    const btn = (id, tip, on, child) => div().id(`${id}-${sp.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
       .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
     const menu = () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } });
     const g = this.gitOf(spacePlace(sp, panes()), sp.machine);
-    return v_flex().mt(tree ? 2 : 6).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(h_flex().id(`space-${sp.id}`).px(6).h(34).flex_none().gap(8).items_center().rounded(8)
+    return v_flex().mt(tree ? 1 : 3).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(h_flex().id(`space-${sp.id}`).px(6).h(28).flex_none().gap(6).items_center().rounded(6)
       .when(sp.active, (el) => el.bg(t.selected)).hover((st) => st.bg(sp.active ? t.selected : t.hover))
       .on_click(() => run("space.select", { id: sp.id }))
       .on_mouse_down("right", menu)
@@ -758,7 +758,7 @@ export default class Maestro extends View {
         .child(svg(`mods/workspace-chrome/${open ? "minus" : "plus"}.svg`).size(11)))
       .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
       .when(!tree, (el) => el.child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?")))
-      .child(div().flex_1().min_w(0).truncate().text_size(tree ? 14 : 15).font_bold().child(sp.name))
+      .child(div().flex_1().min_w(0).truncate().text_size(tree ? 13 : 14).font_bold().child(sp.name))
       .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 1)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
       .child(btn("sph", hidden ? "Show finished agents" : "Hide finished agents", () => setShared("maestro.hideFinished", { ...(shared("maestro.hideFinished") ?? {}), [sp.id]: !hidden }),
@@ -773,7 +773,7 @@ export default class Maestro extends View {
         svg("mods/workspace-chrome/chevron-down.svg").size(11)))
       .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
-      .when(open, (el) => el.child(div().mx(6).mt(4).h(1).flex_none().bg(t.border)));
+      .when(open, (el) => el.child(div().mx(6).mt(2).h(1).flex_none().bg(t.border)));
   }
 
   // The space's worktree actions, as Herdr's space menu: each opens Herdr's worktree dialog.
@@ -800,7 +800,7 @@ export default class Maestro extends View {
     const m = this.wtMenu;
     const agents = this.sessions().filter((x) => x.a.space === sp.id).length;
     const why = !g.linked ? null : agents ? `${agents} agent${agents > 1 ? "s" : ""} still in it` : m.dirty == null ? "checking…" : m.dirty ? "uncommitted changes" : null;
-    const item = (id, label, on, off) => h_flex().id(`spw-${id}-${sp.id}`).px(8).h(26).gap(8).items_center().rounded(6).text_size(12.5)
+    const item = (id, label, on, off) => h_flex().id(`spw-${id}-${sp.id}`).px(8).h(24).gap(6).items_center().rounded(6).text_size(12.5)
       .when(!off, (el) => el.cursor_pointer().text_color(t.foreground).hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); on(); }))
       .when(Boolean(off), (el) => el.text_color(t.dim).tooltip(`Can't remove: ${off}`))
       .child(svg("mods/workspace-chrome/git-branch.svg").size(12).flex_none().text_color(t.dim))
@@ -829,7 +829,7 @@ export default class Maestro extends View {
     const icon = svg(`mods/workspace-chrome/${e.name ? "server" : "monitor"}.svg`).size(13).flex_none();
     if (narrow) return h_flex().id(`machine-${tag}`).h(22).flex_none().justify_center().items_center().gap(3).text_color(t.dim)
       .hover((st) => st.bg(t.hover)).tooltip(e.name ?? "This computer").on_click(fold).child(icon).child(dot);
-    const head = h_flex().id(`machine-${tag}`).mt(8).h(26).flex_none().px(8).gap(7).items_center().rounded(6).text_size(11).text_color(t.dim)
+    const head = h_flex().id(`machine-${tag}`).mt(4).h(24).flex_none().px(8).gap(6).items_center().rounded(6).text_size(11).text_color(t.dim)
       .cursor_pointer().hover((st) => st.bg(t.hover))
       .on_click(fold)
       .child(icon)
@@ -869,13 +869,13 @@ export default class Maestro extends View {
     const detail = [g?.branch === "HEAD" ? "detached" : g?.branch, g?.tree].filter(Boolean).join(" · ");
     const all = this.flat(tr.items, kidsOf);
     const n = all.length;
-    return h_flex().id(fid).mt(4).pl(4).pr(8).py(3).flex_none().gap(8).items_center().rounded(6).hover((st) => st.bg(t.hover))
+    return h_flex().id(fid).mt(2).pl(4).pr(6).py(2).flex_none().gap(6).items_center().rounded(6).hover((st) => st.bg(t.hover))
       .on_click((_e, cx) => this.fold(fid, cx))
       .child(div().w(10).text_size(10).text_color(t.dim).child(open ? "⌄" : "›"))
       .child(svg("mods/workspace-chrome/git-branch.svg").size(15).flex_none().text_color(t.muted))
-      .child(v_flex().flex_1().min_w(0)
-        .child(div().truncate().text_size(13).font_semibold().child(name))
-        .when(Boolean(detail), (el) => el.child(div().truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
+      .child(h_flex().flex_1().min_w(0).gap(6).items_center()
+        .child(div().min_w(0).truncate().text_size(13).font_semibold().child(name))
+        .when(Boolean(detail), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
       .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
       .child(this.launchButtons(t, fid, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null));
@@ -919,11 +919,11 @@ export default class Maestro extends View {
     const tasks = visibleRows(x.s ? treeRows(x.s, now, keepMs()) : [], Boolean(shared("maestro.showFinished")));
     const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
-    rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 2, bottom: 2 }));
+    rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 1, bottom: 1 }));
     if (tasks.length) {
       const tid = `tasks:${x.a.address}`;
       const open = !this.folded.has(tid);
-      rows.push(h_flex().id(tid).ml(14 + depth * 14).pl(26).py(2).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
+      rows.push(h_flex().id(tid).ml(14 + depth * 14).pl(26).py(1).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => this.fold(tid, cx))
         .child(div().w(10).text_size(10).child(open ? "⌄" : "›"))
         .child(shared("maestro.showFinished") ? `${tasks.length} subagent${tasks.length > 1 ? "s" : ""}` : `${tasks.length} running subagent${tasks.length > 1 ? "s" : ""}`)
@@ -977,28 +977,28 @@ export default class Maestro extends View {
     const stop = (_e, cx) => cx.stop_propagation();
     const asks = why && a.status === "blocked";
     const line = asks ? why : why ? `${why} · ${this.task(x)}` : this.task(x);
-    const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(10).pr(8).py(7).gap(10).items_center().rounded(8).opacity(finished ? 0.6 : 1)
+    const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(8).pr(6).py(4).gap(8).items_center().rounded(6).opacity(finished ? 0.6 : 1)
       .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => this.focus(x))
       .on_hover((on, cx) => { if (on) this.readScreen(a.address); this.hoverCard(a.address, on, cx); })
-      .when(a.focused, (el) => el.child(div().absolute().left(0).top(6).bottom(6).w(3).rounded(2).bg(t.working)))
-      .child(this.icon(t, x, 22))
-      .child(v_flex().flex_1().min_w(0).gap(2)
+      .when(a.focused, (el) => el.child(div().absolute().left(0).top(4).bottom(4).w(3).rounded(2).bg(t.working)))
+      .child(this.icon(t, x, 20))
+      .child(v_flex().flex_1().min_w(0).gap(1)
         .child(h_flex().gap(6).items_center()
-          .child(div().flex_1().min_w(0).truncate().text_size(14).font_semibold().child(this.title(x)))
+          .child(div().flex_1().min_w(0).truncate().text_size(13).font_semibold().child(this.title(x)))
           .when(tags.length > 0, (el) => el.child(this.tagChips(t, tags)))
           .child(this.pinControl(t, x)))
         .child(h_flex().gap(6).items_center()
           .child(this.statusGlyph(t, x, 12))
-          .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(asks ? t.foreground : why ? t.blocked : t.muted).child(line || "—"))
+          .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(asks ? t.foreground : why ? t.blocked : t.muted).child(line || "—"))
           .when(Boolean(why), (el) => el.child(div().id(`ack-${a.address}`).px(4).rounded(4).text_size(10.5).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
             .tooltip("Acknowledge (answers nothing)").on_mouse_down("left", stop)
             .on_click((_e, cx) => { cx.stop_propagation(); setShared("maestro.acked", [...(shared("maestro.acked") ?? []), ackKey].slice(-300)); })
             .child("✓"))))
         .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
       .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
-      .child(this.pet(x, 26));
-    return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(2).pl(depth ? 8 : 0).flex_none().items_stretch()
+      .child(this.pet(x, 22));
+    return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(1).pl(depth ? 8 : 0).flex_none().items_stretch()
       .on_hover((on, cx) => { if (on) this.hovered = a.address; else if (this.hovered === a.address) this.hovered = null; cx.notify(); })
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
       .child(div().flex_1().min_w(0)
@@ -1043,7 +1043,7 @@ export default class Maestro extends View {
       .child(div().w(64).flex_none().text_color(t.dim).child(k))
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(String(v)));
     const lines = cost ? `+${cost.total_lines_added ?? 0} / −${cost.total_lines_removed ?? 0}` : null;
-    return v_flex().w(300).p(12).gap(6).rounded(10).bg(t.popover ?? t.raised).border_1().border_color(t.border).shadow_lg().text_color(t.foreground)
+    return v_flex().w(300).p(10).gap(4).rounded(10).bg(t.popover ?? t.raised).border_1().border_color(t.border).shadow_lg().text_color(t.foreground)
       .child(h_flex().gap(10).items_center()
         .child(this.pet(x, 48))
         .child(v_flex().flex_1().min_w(0).gap(2)
@@ -1118,10 +1118,10 @@ export default class Maestro extends View {
     const age = r.status === "idle" ? `idle ${ago(now - (r.lastAt ?? r.ended ?? now))}` : ago((r.status === "running" ? now : r.ended ?? now) - r.started);
     const stats = [r.tools ? `${r.tools} tools` : null, age].filter(Boolean).join(" · ");
     const tip = [r.name, r.description, r.status === "idle" ? "Idle: can still be messaged" : null, r.kind && r.kind !== r.name ? r.kind : null, [r.model, r.effort].filter(Boolean).join(" · "), r.mode, r.turns > 1 ? `${r.turns} turns` : null, r.tokens ? `${compact(r.tokens)} tokens` : null, stats].filter(Boolean).join("\n");
-    return h_flex().id(`a-${x.a.address}-${r.id}`).ml(14 + depth * 14).pl(30 + r.depth * 14).pr(10).h(sub ? 36 : 24).flex_none().gap(0).items_center().text_size(12.5)
+    return h_flex().id(`a-${x.a.address}-${r.id}`).ml(14 + depth * 14).pl(30 + r.depth * 14).pr(8).h(sub ? 34 : 22).flex_none().gap(0).items_center().text_size(12.5)
       .tooltip(tip)
-      .child(div().self_start().w(10).h(last ? 12 : sub ? 36 : 24).mr(6).flex_none().border_l(1).border_color(t.border)
-        .child(div().mt(11).w(8).border_b(1).border_color(t.border)))
+      .child(div().self_start().w(10).h(last ? 11 : sub ? 34 : 22).mr(6).flex_none().border_l(1).border_color(t.border)
+        .child(div().mt(10).w(8).border_b(1).border_color(t.border)))
       .child(v_flex().flex_1().min_w(0)
         .child(div().truncate().text_color(live ? t.foreground : t.muted).child(r.name))
         .when(Boolean(sub), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(sub))))
@@ -1168,7 +1168,7 @@ export default class Maestro extends View {
   tagChips(t, tags) {
     return h_flex().flex_none().gap(4).children(tags.slice(0, 3).map(({ g, mine }) => {
       const c = this.tagColor(t, g);
-      return div().px(6).h(18).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? t.background : c)
+      return div().px(5).h(16).flex().items_center().rounded(4).border_1().border_dashed().border_color(mine ? t.background : c)
         .bg(mine ? c : c + "22").text_size(11).font_medium().text_color(mine ? t.background : c).child(g);
     }));
   }
@@ -1254,27 +1254,26 @@ export default class Maestro extends View {
     const seen = new Date(this.observed(x));
     const pad = (n) => String(n).padStart(2, "0");
     const stamp = `${seen.getFullYear()}-${pad(seen.getMonth() + 1)}-${pad(seen.getDate())} ${pad(seen.getHours())}:${pad(seen.getMinutes())}:${pad(seen.getSeconds())}`;
-    const field = (k, v, copyText = v, mono = true) => v == null || v === "" ? null : v_flex().gap(1)
-      .child(h_flex().gap(4).items_center()
-        .child(div().text_size(11).text_color(t.dim).child(k))
-        .child(div().id(`copy-${k}`).size(16).flex_none().flex().items_center().justify_center().rounded(4).text_color(t.dim)
-          .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(`Copy ${k.toLowerCase()}`)
-          .on_click((_e, cx) => this.copy(cx, k, copyText))
-          .child(svg("mods/maestro/copy.svg").size(11))))
-      .child(div().truncate().text_size(12).text_color(t.foreground).when(mono, (el) => el.font_family(MONO)).child(String(v)));
+    const field = (k, v, copyText = v, mono = true) => v == null || v === "" ? null : h_flex().gap(6).items_center()
+      .child(div().w(84).flex_none().truncate().text_size(11).text_color(t.dim).child(k))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).when(mono, (el) => el.font_family(MONO)).child(String(v)))
+      .child(div().id(`copy-${k}`).size(16).flex_none().flex().items_center().justify_center().rounded(4).text_color(t.dim)
+        .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(`Copy ${k.toLowerCase()}`)
+        .on_click((_e, cx) => this.copy(cx, k, copyText))
+        .child(svg("mods/maestro/copy.svg").size(11)));
     const metric = (v) => div().flex_1().min_w(0).truncate().child(v);
-    return v_flex().id("maestro-footer").size_full().min_h(0).overflow_y_scrollbar().px(12).pt(10).pb(10).gap(8).bg(t.chrome)
-      .child(h_flex().gap(12).items_center()
-        .child(div().id("pet-box").size(64).flex_none().rounded(10).border_1().border_color(t.border).bg(t.surface).flex().items_center().justify_center()
+    return v_flex().id("maestro-footer").size_full().min_h(0).overflow_y_scrollbar().px(10).pt(6).pb(6).gap(4).bg(t.chrome)
+      .child(h_flex().gap(10).items_center()
+        .child(div().id("pet-box").size(48).flex_none().rounded(8).border_1().border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .tooltip(`${this.petOf(x)?.name ?? "No pet"} · ${this.petMood(x)} — click to open the pet pokedex`)
           .on_click(() => this.openPets())
-          .child(this.pet(x, 52)))
+          .child(this.pet(x, 40)))
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().truncate().text_size(14).font_semibold().child(this.title(x)))
           .child(h_flex().gap(6).items_center().child(this.statusGlyph(t, x, 11))
             .child(div().truncate().text_size(12).text_color(t.muted).child(`${STATUS_WORD[x.failed ? "failed" : a.status]} · ${a.address}`)))
           .when(Boolean(model), (el) => el.child(div().truncate().text_size(12).text_color(t.dim).child(effort && !model.includes(" · ") ? `${model} · ${effort}` : model)))))
-      .child(h_flex().gap(8).items_center().text_size(11.5).text_color(t.muted)
+      .child(h_flex().gap(6).items_center().text_size(11.5).text_color(t.muted)
         .child(metric(ctx != null ? `${ctx}% context${snap?.ai_used?.formatted ? ` · ${snap.ai_used.formatted} AIC` : ""}` : snap?.ai_used?.formatted ? `${snap.ai_used.formatted} AIC` : "—"))
         .child(metric(up != null ? `${ago(up)} elapsed` : "—").text_center())
         .child(h_flex().flex_1().min_w(0).justify_end().gap(4)
@@ -1307,7 +1306,7 @@ export default class Maestro extends View {
         field("Terminal", a.parent ? `${a.address} · child of ${a.parent}` : a.address, a.address),
         field("Machine", x.machine),
       ].filter(Boolean))
-      .when(sched.length > 0, (el) => el.child(v_flex().gap(2)
+      .when(sched.length > 0, (el) => el.child(v_flex().gap(1)
         .child(div().text_size(11).text_color(t.dim).child(`Beats ${sched.length}`))
         .children(sched.map((b) => {
           const n = nextRun(b, now);
@@ -1346,7 +1345,7 @@ export default class Maestro extends View {
   renderBoard(t, list, now) {
     const cols = BOARD.map((c) => ({ ...c, items: list.filter((x) => this.boardColumn(x) === c.id) }));
     return v_flex().id("maestro-board").track_focus(this.handle).on_key_down((e, cx) => { if (e.key === "escape" && props()?.place !== "pane") { this.dismissBoard(); cx.stop_propagation(); } }).size_full().bg(t.canvas).text_color(t.foreground).text_size(13)
-      .child(h_flex().px(16).py(12).gap(10).items_center().bg(t.chrome)
+      .child(h_flex().px(12).py(8).gap(8).items_center().bg(t.chrome)
         .child(div().text_size(16).child("Maestro board"))
         .child(div().text_color(t.dim).child(`${list.length} sessions`))
         .child(div().flex_1())
@@ -1354,9 +1353,9 @@ export default class Maestro extends View {
         .child(div().id("board-close").px(8).rounded(4).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", (_e, cx) => { if (props()?.place !== "pane") cx.stop_propagation(); })
           .on_click(() => this.dismissBoard()).child("×")))
-      .child(h_flex().id("board-cols").flex_1().min_h(0).p(12).gap(10).items_start().children(cols.map((c) =>
-        v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(8).gap(8).rounded(10).bg(t.chrome).overflow_y_scrollbar()
-          .child(h_flex().gap(6).items_center().pb(2)
+      .child(h_flex().id("board-cols").flex_1().min_h(0).p(8).gap(8).items_start().children(cols.map((c) =>
+        v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(6).gap(6).rounded(8).bg(t.chrome).overflow_y_scrollbar()
+          .child(h_flex().gap(6).items_center().px(2)
             .child(div().size(8).rounded(4).bg(c.id === "failed" ? t.blocked : t[c.id] ?? t.idle))
             .child(div().text_size(12).text_color(t.muted).child(c.label))
             .child(div().text_size(11).text_color(t.dim).child(String(c.items.length))))
@@ -1368,7 +1367,7 @@ export default class Maestro extends View {
     const why = x.kind ?? (s ? attention(s) : null);
     const running = s ? treeRows(s, now, keepMs()).filter((r) => r.status === "running").length : 0;
     const tags = [...x.userTags.map((g) => ({ g, mine: true })), ...(x.rec.tags ?? []).map((g) => ({ g, mine: false }))];
-    return v_flex().id(`card-${a.address}`).p(8).gap(4).rounded(8).bg(t.surface).border_1().border_color(a.focused ? t.accent : t.border)
+    return v_flex().id(`card-${a.address}`).px(8).py(6).gap(3).rounded(6).bg(t.surface).border_1().border_color(a.focused ? t.accent : t.border)
       .hover((st) => st.bg(t.hover))
       .on_click(() => this.focus(x))
       .child(h_flex().gap(6).items_center()
