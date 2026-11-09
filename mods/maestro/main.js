@@ -14,6 +14,7 @@ import { isCopilot } from "./agentlib.js";
 import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, resolvePet } from "./petlib.js";
 import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
+import { spaceFill, inkOn } from "./spacecolor.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
@@ -31,7 +32,6 @@ const ICONS = {
 // Identity colors come from the active Herdr theme, so icons and tags follow theme changes.
 const palette = (t) => [t.ansi6, t.ansi3, t.ansi4, t.ansi5, t.ansi2, t.ansi1].filter(Boolean);
 const themed = (t, c) => (c && !c.startsWith("#") ? t[c] : c);
-const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619); return h >>> 0; };
 const find = (node, id) => { if (node?.id === id) return node; for (const c of node?.children ?? []) { const f = find(c, id); if (f) return f; } return null; };
 // `maestro mood` words to pet moods.
@@ -739,8 +739,6 @@ export default class Maestro extends View {
     const fid = `sp:${sp.id}`;
     const open = !this.folded.has(fid);
     const all = this.flat(mine, kidsOf);
-    const color = (shared("space.colors") ?? {})[sp.id] ?? "ansi6";
-    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color] ?? t.accent);
     const hidden = Boolean((shared("maestro.hideFinished") ?? {})[sp.id]);
     const stop = (_e, cx) => cx.stop_propagation();
     const btn = (id, tip, on, child) => div().id(`${id}-${sp.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
@@ -756,8 +754,8 @@ export default class Maestro extends View {
         .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); this.fold(fid, cx); })
         .child(svg(`mods/workspace-chrome/${open ? "minus" : "plus"}.svg`).size(11)))
-      .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
-      .when(!tree, (el) => el.child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?")))
+      .when(Boolean(tree), (el) => el.child(this.spaceAvatar(t, sp, 14, false, true)))
+      .when(!tree, (el) => el.child(this.spaceAvatar(t, sp, 16)))
       .child(div().flex_1().min_w(0).truncate().text_size(tree ? 13 : 14).font_bold().child(sp.name))
       .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 1)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
@@ -774,6 +772,23 @@ export default class Maestro extends View {
       .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .when(open, (el) => el.child(div().mx(6).mt(2).h(1).flex_none().bg(t.border)));
+  }
+
+  // A space's colored initial (shared("space.colors"), as Herdr's Spaces sidebar); a click or
+  // right-click opens its color picker without selecting or dragging the space. In the rail
+  // (`select`) a click still selects the space; right-click picks the color. A worktree space
+  // nested under its checkout (`branch`) shows its branch icon in its color instead.
+  spaceAvatar(t, sp, size, select = false, branch = false) {
+    const fill = spaceFill(t, (shared("space.colors") ?? {})[sp.id]);
+    const stop = (_e, cx) => cx.stop_propagation();
+    const pick = (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "maestro-color", kind: "popup", at: "pointer", width: 280, height: 300, props: { space: sp.id } }); };
+    if (branch) return div().id(`spc-${sp.id}`).flex_none().cursor_pointer().tooltip("Space color")
+      .on_mouse_down("right", pick).on_mouse_down("left", stop).on_click(pick)
+      .child(svg("mods/workspace-chrome/branch.svg").size(size).text_color(fill));
+    return h_flex().id(`spc-${sp.id}`).size(size).flex_none().rounded(4).bg(fill).items_center().justify_center()
+      .text_size(size * 0.625).font_bold().text_color(inkOn(fill)).cursor_pointer().tooltip(select ? sp.name : "Space color")
+      .on_mouse_down("right", pick).when(!select, (el) => el.on_mouse_down("left", stop).on_click(pick))
+      .child([...sp.name][0]?.toUpperCase() ?? "?");
   }
 
   // The space's worktree actions, as Herdr's space menu: each opens Herdr's worktree dialog.
@@ -857,7 +872,7 @@ export default class Maestro extends View {
     return h_flex().id(`rail-${sp.id}`).h(28).flex_none().justify_center().items_center().gap(4)
       .when(sp.active, (el) => el.bg(t.raised)).hover((st) => st.bg(t.hover))
       .on_click(() => run("space.select", { id: sp.id }))
-      .child(div().text_color(sp.active ? t.foreground : t.muted).child([...sp.name][0]?.toUpperCase() ?? "?"))
+      .child(this.spaceAvatar(t, sp, 16, true))
       .child(this.statusDot(t, worst));
   }
 
