@@ -739,7 +739,6 @@ export default class Maestro extends View {
     const fid = `sp:${sp.id}`;
     const open = !this.folded.has(fid);
     const all = this.flat(mine, kidsOf);
-    const worst = all.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
     const color = (shared("space.colors") ?? {})[sp.id] ?? "ansi6";
     const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color] ?? t.accent);
     const hidden = Boolean((shared("maestro.hideFinished") ?? {})[sp.id]);
@@ -760,12 +759,11 @@ export default class Maestro extends View {
       .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
       .when(!tree, (el) => el.child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?")))
       .child(div().flex_1().min_w(0).truncate().text_size(tree ? 14 : 15).font_bold().child(sp.name))
-      .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
-      .when(!open && worst !== "idle" && all.length > 3, (el) => el.child(this.statusDot(t, worst)))
+      .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 1)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
       .child(btn("sph", hidden ? "Show finished agents" : "Hide finished agents", () => setShared("maestro.hideFinished", { ...(shared("maestro.hideFinished") ?? {}), [sp.id]: !hidden }),
         svg("mods/maestro/eye-off.svg").size(13).when(hidden, (el) => el.text_color(t.accent))))
-      .child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗")))
+      .when(open, (el) => el.child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗"))))
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
@@ -878,7 +876,7 @@ export default class Maestro extends View {
       .child(v_flex().flex_1().min_w(0)
         .child(div().truncate().text_size(13).font_semibold().child(name))
         .when(Boolean(detail), (el) => el.child(div().truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
-      .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 5)))
+      .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
       .child(this.launchButtons(t, fid, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null));
   }
