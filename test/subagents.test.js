@@ -44,3 +44,18 @@ test("an idle child stays visible after its finished parent expires", () => {
   const rows = treeRows(s, Date.parse(at(1)) + 3600_000, 600_000);
   assert.deepEqual(rows.map((r) => [r.id, r.status, r.depth]), [["c", "idle", 0]]);
 });
+
+test("a session resume or shutdown ends subagents that were running or idle", () => {
+  const s = emptySession();
+  applyEvent(s, ev("subagent.started", 0, { agentDisplayName: "bg" }, "a1"));
+  applyEvent(s, ev("subagent.configured", 0, { multiTurn: true }, "a1"));
+  applyEvent(s, ev("subagent.completed", 1, {}, "a1"));
+  applyEvent(s, ev("subagent.started", 1, { agentDisplayName: "busy" }, "a2"));
+  applyEvent(s, ev("subagent.started", 1, { agentDisplayName: "done" }, "a3"));
+  applyEvent(s, ev("subagent.completed", 2, {}, "a3"));
+  applyEvent(s, ev("session.resume", 5, {}));
+  assert.deepEqual(["a1", "a2", "a3"].map((id) => s.agents.get(id).status), ["ended", "ended", "done"]);
+  assert.deepEqual(treeRows(s, Date.parse(at(5)) + 3600_000, 600_000), [], "ended agents expire like finished ones");
+  applyEvent(s, ev("subagent.started", 6, { agentDisplayName: "new" }, "a4"));
+  assert.equal(s.agents.get("a4").status, "running", "agents started after the resume are live");
+});

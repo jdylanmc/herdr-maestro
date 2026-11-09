@@ -1,6 +1,6 @@
 // Folds a Copilot session's events.jsonl into what Maestro shows. Pure: no herdr imports.
 
-const WANTED = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
+const WANTED = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|resume|shutdown|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
 
 export function emptySession() {
   return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, schedules: new Map(), lastPromptAt: null, started: null, turnStart: null, error: null };
@@ -45,6 +45,19 @@ export function applyEvent(s, e) {
   if (e.agentId && !e.type.startsWith("subagent.") && trackAgent(s, e, d, t)) return s;
   switch (e.type) {
     case "session.start": s.started = Date.parse(d.startTime) || t; break;
+    // Subagents live in the Copilot process: a restart (resume) or exit ends every one still
+    // running or idle, and the log records nothing else for them.
+    case "session.resume":
+    case "session.shutdown":
+      if (e.agentId) break;
+      for (const a of s.agents.values()) {
+        if (a.status !== "running" && a.status !== "idle") continue;
+        a.status = "ended";
+        a.ended = t ?? a.lastAt ?? a.started;
+        a.activity = null;
+      }
+      s.turnStart = null; s.perms.clear(); s.asks.clear();
+      break;
     case "session.model_change": if (e.agentId) break; s.model = d.newModel ?? s.model; if (d.reasoningEffort) { s.effort = d.reasoningEffort; s.effortSet = true; } break;
     case "session.schedule_created":
       if (d.id == null) break;

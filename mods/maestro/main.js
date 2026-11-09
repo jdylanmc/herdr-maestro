@@ -1106,6 +1106,7 @@ export default class Maestro extends View {
     if (r.status === "idle") return div().size(8).mx(2).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
     if (r.status === "failed") return div().text_size(12).text_color(t.blocked).child("⊗");
     if (r.status === "cancelled") return div().text_size(12).text_color(t.blocked).child("‖");
+    if (r.status === "ended") return div().text_size(12).text_color(t.dim).child("⊘");
     return div().text_size(12).text_color(t.muted).child("✓");
   }
 
