@@ -45,7 +45,8 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
 (Herdr keeps it with the layout's clicks, not in the layout file).
 
 **Hierarchy** (replaces Herdr's separate spaces and agents lists in the Maestro layout)
-- **Space** → **worktree/repo** → **agent card** → its **internal tasks** (Copilot subagents) and
+- **Space** → **worktree/repo** → **agent card** → its **running subagents** (Copilot subagents; the
+  header's show-finished toggle also lists idle and finished ones) and
   **workers** (`maestro spawn` / `hc run`), indented like an outline. As in Herdr's spaces list,
   a worktree space sits under its repo's space with a branch icon; a space's branch button offers
   New / Open / Remove worktree (Herdr's dialogs; Remove only when clean with no agent in it). Folding a space or worktree
