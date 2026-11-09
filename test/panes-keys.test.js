@@ -161,6 +161,14 @@ test("clicking a space's avatar opens its color picker instead of selecting the 
   assert.equal(board.commands.some((c) => c.command === "space.select"), false);
 });
 
+test("a worktree space nested under its checkout opens the picker from its branch icon", () => {
+  const sp = { id: "s2", name: "feature" };
+  const board = loadMod("maestro", { spaceList: [sp] });
+  board.mod.spaceRow({}, sp, [], new Map(), { id: "s1" });
+  board.click("spc-s2", null);
+  assert.deepEqual(board.overlays.map((o) => [o.mod, o.props.space]), [["maestro-color", "s2"]]);
+});
+
 test("keyboard navigation can reopen a machine when every machine is folded", async () => {
   const sp = { id: "box/s1", name: "Remote", folder: "/remote/repo", machine: "box" };
   const { mod, cx } = loadMod("maestro", { spaceList: [sp] });

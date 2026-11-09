@@ -754,7 +754,7 @@ export default class Maestro extends View {
         .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); this.fold(fid, cx); })
         .child(svg(`mods/workspace-chrome/${open ? "minus" : "plus"}.svg`).size(11)))
-      .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
+      .when(Boolean(tree), (el) => el.child(this.spaceAvatar(t, sp, 14, false, true)))
       .when(!tree, (el) => el.child(this.spaceAvatar(t, sp, 16)))
       .child(div().flex_1().min_w(0).truncate().text_size(tree ? 13 : 14).font_bold().child(sp.name))
       .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 1)))
@@ -776,11 +776,15 @@ export default class Maestro extends View {
 
   // A space's colored initial (shared("space.colors"), as Herdr's Spaces sidebar); a click or
   // right-click opens its color picker without selecting or dragging the space. In the rail
-  // (`select`) a click still selects the space; right-click picks the color.
-  spaceAvatar(t, sp, size, select = false) {
+  // (`select`) a click still selects the space; right-click picks the color. A worktree space
+  // nested under its checkout (`branch`) shows its branch icon in its color instead.
+  spaceAvatar(t, sp, size, select = false, branch = false) {
     const fill = spaceFill(t, (shared("space.colors") ?? {})[sp.id]);
     const stop = (_e, cx) => cx.stop_propagation();
     const pick = (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "maestro-color", kind: "popup", at: "pointer", width: 280, height: 300, props: { space: sp.id } }); };
+    if (branch) return div().id(`spc-${sp.id}`).flex_none().cursor_pointer().tooltip("Space color")
+      .on_mouse_down("right", pick).on_mouse_down("left", stop).on_click(pick)
+      .child(svg("mods/workspace-chrome/branch.svg").size(size).text_color(fill));
     return h_flex().id(`spc-${sp.id}`).size(size).flex_none().rounded(4).bg(fill).items_center().justify_center()
       .text_size(size * 0.625).font_bold().text_color(inkOn(fill)).cursor_pointer().tooltip(select ? sp.name : "Space color")
       .on_mouse_down("right", pick).when(!select, (el) => el.on_mouse_down("left", stop).on_click(pick))

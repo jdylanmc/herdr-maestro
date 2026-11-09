@@ -63,7 +63,7 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there;
   the folder button picks a folder first and starts Copilot in it. Click (or right-click) a space's
-  avatar to pick its color: Herdr's six, theme colors, a custom `#rrggbb`, or Auto (Herdr picks again).
+  avatar (a nested worktree space's branch icon) to pick its color: Herdr's six, theme colors, a custom `#rrggbb`, or Auto (Herdr picks again).
   A worktree's `+` starts Copilot in that worktree. The chevron beside either `+` lists every agent
   Herdr knows (`knownAgents()`: Claude Code, Codex, …, installed ones first) and starts the one you pick there.
 - **Any agent:** every terminal Herdr counts as an agent gets a card, status, task, tags, pet (mood from
