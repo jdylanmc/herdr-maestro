@@ -73,3 +73,27 @@ test("visibleRows lists only running subagents and lifts a running child of a hi
   assert.deepEqual(visibleRows(rows, false).map((r) => [r.id, r.depth]), [["c", 0], ["g", 1], ["q", 0], ["e", 1]]);
   assert.deepEqual(visibleRows([{ id: "x", status: "idle", depth: 0 }], false), []);
 });
+
+test("a background subagent's follow-up turn ends idle on the parent's agent_idle notification", () => {
+  const s = emptySession();
+  const idle = (m, id = "a1") => ev("system.notification", m, { kind: { type: "agent_idle", agentId: id } });
+  applyEvent(s, ev("subagent.started", 0, { agentDisplayName: "bg" }, "a1"));
+  applyEvent(s, ev("subagent.configured", 0, { multiTurn: true }, "a1"));
+  applyEvent(s, ev("subagent.completed", 1, {}, "a1"));
+  const a = s.agents.get("a1");
+  assert.equal(a.status, "idle");
+  applyEvent(s, ev("user.message", 2, {}, "a1"));
+  applyEvent(s, ev("assistant.turn_start", 2, {}, "a1"));
+  applyEvent(s, idle(2));
+  assert.equal(a.status, "running", "a late notice for the previous turn does not end the new one");
+  applyEvent(s, ev("tool.execution_start", 3, { toolName: "bash", toolCallId: "c1" }, "a1"));
+  applyEvent(s, ev("tool.execution_complete", 4, { toolCallId: "c1" }, "a1"));
+  applyEvent(s, ev("assistant.turn_end", 4, {}, "a1"));
+  applyEvent(s, idle(5, "unknown"));
+  assert.equal(a.status, "running");
+  applyEvent(s, idle(5));
+  assert.deepEqual([a.status, a.turns, a.activity, a.ended], ["idle", 2, null, Date.parse(at(5))]);
+  assert.deepEqual(visibleRows(treeRows(s, Date.parse(at(6)), 600_000), false), [], "no longer counted as running");
+  applyEvent(s, ev("user.message", 7, {}, "a1"));
+  assert.deepEqual([a.status, a.turns], ["running", 3]);
+});

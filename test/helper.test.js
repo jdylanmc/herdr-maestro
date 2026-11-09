@@ -33,6 +33,17 @@ test("events projects only folded types, drops payloads, and stops before a part
   assert.equal(events(file, 10 ** 9).next, statSync(file).size, "an offset past the end restarts from the start");
 });
 
+test("events keeps only a subagent's lifecycle from system notifications, never their content", (t) => {
+  const file = join(scratch(t), "events.jsonl");
+  const lines = [
+    { type: "system.notification", timestamp: "2026-01-01T00:00:00Z", data: { content: "secret summary", kind: { type: "shell_completed", shellId: "1" } } },
+    { type: "system.notification", timestamp: "2026-01-01T00:00:01Z", data: { content: "secret summary", kind: { type: "agent_idle", agentId: "a1", displayName: "bg", description: "secret task" } } },
+  ].map((e) => JSON.stringify(e)).join("\n") + "\n";
+  writeFileSync(file, lines);
+  const { events: out } = events(file, 0);
+  assert.deepEqual(out, [{ type: "system.notification", timestamp: "2026-01-01T00:00:01Z", data: { kind: { type: "agent_idle", agentId: "a1" } } }]);
+});
+
 test("locks lists inuse.<pid>.lock files per session folder", (t) => {
   const dir = scratch(t);
   for (const [id, files] of [["s1", ["inuse.42.lock", "events.jsonl"]], ["s2", ["inuse.x.lock"]]]) {
