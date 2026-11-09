@@ -2,7 +2,7 @@
 // import Herdr-only virtual modules, so they are parsed, never run) and every JSON file loads.
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { missingMods } from "./lib/layout-mods.mjs";
 
@@ -13,7 +13,7 @@ const walk = (dir) => readdirSync(join(root, dir)).flatMap((n) => {
 });
 
 const scripts = [...walk("bin"), ...walk("mods"), ...walk("scripts"), ...walk("test")]
-  .filter((p) => p.startsWith("bin/") || /\.(m?js)$/.test(p));
+  .filter((p) => p.startsWith(`bin${sep}`) || /\.(m?js)$/.test(p));
 const json = [...walk("layouts"), ...walk("mods"), ".changeset/config.json", "package.json"]
   .filter((p) => p.endsWith(".json"));
 

@@ -5,7 +5,8 @@ natively as Herdr mods on top of `herdr-core` (`hc`). It shows every coding agen
 (GitHub Copilot CLI in most depth: its workers and subagents, what each one costs), what
 each needs from you, and gives agents a small CLI to coordinate with each other.
 
-> Status: alpha, used daily on macOS. Linux and Windows paths are written but untested.
+> Status: alpha, used daily on macOS. Linux paths are written but untested.
+> Windows has a native installer (see below).
 
 ## Install
 
@@ -19,6 +20,24 @@ git config core.hooksPath .githooks
 ```
 
 Restart Copilot sessions after installing so they pick up the status-line bridge.
+
+The mod includes its required icon font under `mods/maestro/fonts`, loaded by
+Herdr on every platform. No system Nerd Font installation is required.
+
+On Windows, run from PowerShell:
+
+```powershell
+git config core.hooksPath .githooks
+node scripts\install.mjs
+```
+
+The native installer needs no Bash, Python, administrator access, or Developer
+Mode. It junctions the mod and skill directories, copies the layout, installs a
+`maestro.cmd` launcher under `~\.local\bin`, and adds that directory to your user
+PATH. Existing settings are preserved and changed files are backed up. Re-run
+after changing the layout. Restart Herdr and Copilot sessions after installation.
+Use **Ctrl+Shift+M** to toggle Maestro; **Ctrl+Shift+B**, **Ctrl+Shift+T**, and
+**Ctrl+Shift+K** open its board, tags, and pets while in the Maestro layout.
 
 ## Using it
 
@@ -202,4 +221,5 @@ npx changeset     # describe the change: patch, minor, or major
 
 ## License
 
-MIT
+MIT, except for the bundled [icon font](mods/maestro/fonts/README.md), which is
+licensed under the SIL Open Font License 1.1.
