@@ -154,6 +154,13 @@ test("launch menu: Enter starts Copilot; In another folder hands the selected ag
   assert.equal(late.menu.commands.length, 0, "Enter still means the folder row");
   assert.deepEqual(Array.from(late.menu.store.get("maestro.launchInFolder").argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "copilot", "--yolo"]);
 
+  const gone = open();
+  gone.key("down"); // Claude, installed per the cache
+  gone.key("down"); // the folder row
+  gone.menu.mod.agents = [{ ...agents[0], installed: false }, agents[1]]; // discovery: Claude is not installed
+  gone.key("enter");
+  assert.deepEqual(Array.from(gone.menu.store.get("maestro.launchInFolder").argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "copilot", "--yolo"]);
+
   const board = loadMod("maestro", { spaceList: [space], pickFolder: async () => "/picked" });
   board.mod.launchInFolderState();
   assert.equal(board.tasks.length, 0, "a request from before the sidebar started is not replayed");

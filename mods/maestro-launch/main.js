@@ -49,7 +49,7 @@ export default class MaestroLaunch extends View {
   }
 
   inFolder(items) {
-    const a = items.find((it) => it.kind === "agent" && it.key === this.pick) ?? items[0];
+    const a = items.find((it) => it.kind === "agent" && it.ok && it.key === this.pick) ?? items[0];
     closeOverlay(props().overlay);
     setShared(IN_FOLDER, { at: Date.now(), space: this.space, argv: this.argv(a), name: a.name ?? a.key });
   }
@@ -66,7 +66,7 @@ export default class MaestroLaunch extends View {
     const rowKey = (it) => `${it.kind}:${it.key}`;
     let sel = items.findIndex((it) => it.ok && rowKey(it) === this.selKey);
     if (sel < 0) { sel = 0; this.selKey = rowKey(items[0]); }
-    const picked = items.find((it) => it.kind === "agent" && it.key === this.pick) ?? items[0];
+    const picked = items.find((it) => it.kind === "agent" && it.ok && it.key === this.pick) ?? items[0];
     const icon = (a) => a.kind === FOLDER ? svg("mods/workspace-chrome/folder.svg").size(14).flex_none().text_color(t.foreground)
       : !a.icon ? div().w(14).flex_none() : a.tint ? svg(a.icon).size(14).flex_none().text_color(t.foreground) : image(a.icon).size(14).flex_none();
     return v_flex().id("maestro-launch").size_full().min_h(0).bg(t.popover ?? t.raised).p(5).text_size(12.8).text_color(t.foreground)
