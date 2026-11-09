@@ -5,12 +5,14 @@ import vm from "node:vm";
 import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
 import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
+import { launchItems, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
 
-function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl } = {}) {
+function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
   const overlays = [];
+  const store = new Map();
   const elements = new Map();
   const element = () => {
     const events = {};
@@ -22,6 +24,8 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
           if (key === "id") elements.set(args[0], proxy);
           else if (key === "on_mouse_down") events.down = args[1];
           else if (key === "on_click") events.click = args[0];
+          else if (key === "tooltip") events.tip = args[0];
+          else if (key === "on_key_down") events.key = args[0];
           else if (key === "when" && args[0]) args[1](proxy);
           return proxy;
         };
@@ -33,7 +37,10 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     View: class {},
     div: element, v_flex: element, h_flex: element, svg: element,
     props: () => modProps,
-    shared: () => token,
+    shared: (key) => (store.has(key) ? store.get(key) : token),
+    setShared: (key, value) => { store.set(key, value); },
+    window: () => ({ platform: "macos" }),
+    launchItems, moveSelection, FOLDER, pickFolder,
     focused: () => focus,
     panes: () => paneList,
     spaces: () => spaceList,
@@ -66,14 +73,14 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
   mod.init(modProps, cx);
   tasks.length = 0;
   return {
-    mod, tasks, commands, overlays, elements, cx,
+    mod, tasks, commands, overlays, elements, cx, store,
     setToken(value) { token = value; },
-    click(id, hostingPane) {
+    click(id, hostingPane, modifiers = {}) {
       let stopped = false;
       const events = elements.get(id).events;
       events.down?.({}, { stop_propagation() { stopped = true; } });
       if (!stopped) focus = { pane: hostingPane, tab: paneList.find((p) => p.pane === hostingPane).tab };
-      events.click({}, cx);
+      events.click({ modifiers }, cx);
     },
   };
 }
@@ -102,8 +109,12 @@ for (const [machine, helper] of [[null, null], ["box", "/remote-herdr/mods/maest
       assert.equal(command.args.folder, "/checkout");
       assert.deepEqual(Array.from(command.args.argv), [...wrapper, ...(agent.key === "copilot" ? ["copilot", "--yolo"] : agent.run)]);
     }
-    board.mod.launchButtons({}, "worktree", space.id, "/checkout");
+    board.mod.newButton({}, "wtn-worktree", space.id, "/checkout", 20);
+    assert.equal(board.elements.get("wtn-worktree").events.tip, "New agent… (⌥-click: Copilot here)");
     board.click("wtn-worktree", null);
+    assert.equal(board.overlays.at(-1).mod, "maestro-launch");
+    assert.equal(board.commands.length, 0);
+    board.click("wtn-worktree", null, { alt: true });
     const command = board.commands.at(-1);
     assert.equal(command.command, "tab.new");
     assert.equal(command.args.space, space.id);
@@ -111,6 +122,42 @@ for (const [machine, helper] of [[null, null], ["box", "/remote-herdr/mods/maest
     assert.deepEqual(Array.from(command.args.argv), [...wrapper, "copilot", "--yolo"]);
   });
 }
+
+test("launch menu: Enter starts Copilot; In another folder hands the selected agent to the sidebar's picker", async () => {
+  const space = { id: "s1", machine: null };
+  const agents = [{ key: "claude", name: "Claude", run: ["claude"] }, { key: "copilot", name: "Copilot", run: ["copilot"] }];
+  const open = () => {
+    const menu = loadMod("maestro-launch", { spaceList: [space], modProps: { space: "s1", folder: "/here", overlay: "o" } });
+    menu.mod.agents = agents;
+    let onKey;
+    menu.mod.handle = {};
+    const el = menu.mod.render();
+    const key = (k) => { onKey ??= el.events.key; onKey({ key: k, modifiers: {} }, menu.cx); menu.mod.render(); };
+    return { menu, key };
+  };
+  const a = open();
+  a.key("enter");
+  assert.deepEqual(Array.from(a.menu.commands.at(-1).args.argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "copilot", "--yolo"]);
+  assert.equal(a.menu.commands.at(-1).args.folder, "/here");
+
+  const b = open();
+  b.key("down"); // Claude
+  b.key("down"); // In another folder…
+  b.key("enter");
+  assert.equal(b.menu.commands.length, 0);
+  const req = b.menu.store.get("maestro.launchInFolder");
+  assert.deepEqual(Array.from(req.argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "claude"]);
+
+  const board = loadMod("maestro", { spaceList: [space], pickFolder: async () => "/picked" });
+  board.mod.launchInFolderState();
+  assert.equal(board.tasks.length, 0, "a request from before the sidebar started is not replayed");
+  board.store.set("maestro.launchInFolder", req);
+  board.mod.launchInFolderState();
+  board.mod.launchInFolderState();
+  assert.equal(board.tasks.length, 1);
+  await board.tasks[0](board.cx);
+  assert.deepEqual(board.commands.at(-1), { command: "tab.new", args: { space: "s1", folder: "/picked", argv: req.argv } });
+});
 
 test("keyboard navigation preserves nested worktree rows and refreshes empty spaces", () => {
   const sp = { id: "worktree", folder: "/repo/worktree" };
