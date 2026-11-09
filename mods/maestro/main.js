@@ -530,7 +530,6 @@ export default class Maestro extends View {
       if (narrow) { for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address)); rows.push(this.navRow(t, `sp:${sp.id}`, this.railSpace(t, sp, mine))); continue; }
       rows.push(this.navRow(t, `sp:${sp.id}`, this.spaceRow(t, sp, mine, kidsOf, tree), { top: 6, bottom: 5 }));
       if (this.folded.has(`sp:${sp.id}`)) {
-        if (mine.length) rows.push(this.iconCard(t, `sp:${sp.id}`, this.flat(mine, kidsOf)));
         for (const x of mine) this.walk(x, kidsOf, (y) => order.push(y.a.address));
         continue;
       }
@@ -551,11 +550,11 @@ export default class Maestro extends View {
         const sorted = tr.items.sort(urgent);
         const group = [];
         const at = this.nav.length;
-        if (this.folded.has(fid)) { group.push(this.iconCard(t, fid, this.flat(sorted, kidsOf))); for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address)); }
+        if (this.folded.has(fid)) for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address));
         else for (const x of sorted) this.pushAgent(t, group, order, x, kidsOf, now, 0);
         this.nav.splice(at, 0, { key: fid });
         rows.push(this.navRow(t, fid, this.treeRow(t, fid, tr, kidsOf), { top: 4 }));
-        rows.push(this.guide(t, `g-${fid}`, 9, group));
+        if (group.length) rows.push(this.guide(t, `g-${fid}`, 9, group));
       }
     }
     setAgentOrder(order);
@@ -740,7 +739,6 @@ export default class Maestro extends View {
     const fid = `sp:${sp.id}`;
     const open = !this.folded.has(fid);
     const all = this.flat(mine, kidsOf);
-    const worst = all.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
     const color = (shared("space.colors") ?? {})[sp.id] ?? "ansi6";
     const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color] ?? t.accent);
     const hidden = Boolean((shared("maestro.hideFinished") ?? {})[sp.id]);
@@ -761,11 +759,11 @@ export default class Maestro extends View {
       .when(Boolean(tree), (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(14).flex_none().text_color(t.dim)))
       .when(!tree, (el) => el.child(h_flex().size(16).flex_none().rounded(4).bg(fill).items_center().justify_center().text_size(10).font_bold().text_color("#ffffff").child([...sp.name][0]?.toUpperCase() ?? "?")))
       .child(div().flex_1().min_w(0).truncate().text_size(tree ? 14 : 15).font_bold().child(sp.name))
-      .when(!open && worst !== "idle", (el) => el.child(this.statusDot(t, worst)))
+      .when(!open && all.length > 0, (el) => el.child(this.inlineIcons(t, fid, all, 1)))
       .when(all.length > 0, (el) => el.child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(all.length))))
       .child(btn("sph", hidden ? "Show finished agents" : "Hide finished agents", () => setShared("maestro.hideFinished", { ...(shared("maestro.hideFinished") ?? {}), [sp.id]: !hidden }),
         svg("mods/maestro/eye-off.svg").size(13).when(hidden, (el) => el.text_color(t.accent))))
-      .child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗")))
+      .when(open, (el) => el.child(btn("sps", "Go to space", () => run("space.select", { id: sp.id }), div().text_size(13).child("↗"))))
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
@@ -775,7 +773,7 @@ export default class Maestro extends View {
         svg("mods/workspace-chrome/chevron-down.svg").size(11)))
       .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
-      .child(div().mx(6).mt(4).h(1).flex_none().bg(t.border));
+      .when(open, (el) => el.child(div().mx(6).mt(4).h(1).flex_none().bg(t.border)));
   }
 
   // The space's worktree actions, as Herdr's space menu: each opens Herdr's worktree dialog.
@@ -869,7 +867,8 @@ export default class Maestro extends View {
     const where = place(tr.cwd);
     const name = g?.repo ?? where.repo ?? where.org;
     const detail = [g?.branch === "HEAD" ? "detached" : g?.branch, g?.tree].filter(Boolean).join(" · ");
-    const n = this.flat(tr.items, kidsOf).length;
+    const all = this.flat(tr.items, kidsOf);
+    const n = all.length;
     return h_flex().id(fid).mt(4).pl(4).pr(8).py(3).flex_none().gap(8).items_center().rounded(6).hover((st) => st.bg(t.hover))
       .on_click((_e, cx) => this.fold(fid, cx))
       .child(div().w(10).text_size(10).text_color(t.dim).child(open ? "⌄" : "›"))
@@ -877,6 +876,7 @@ export default class Maestro extends View {
       .child(v_flex().flex_1().min_w(0)
         .child(div().truncate().text_size(13).font_semibold().child(name))
         .when(Boolean(detail), (el) => el.child(div().truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
+      .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
       .child(this.launchButtons(t, fid, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null));
   }
@@ -899,17 +899,18 @@ export default class Maestro extends View {
     openOverlay({ mod: "maestro-launch", kind: "popup", at: "pointer", width: 240, height: 300, props: { space, folder, helper } });
   }
 
-  // A folded space or worktree: its agents' icons and state cues in one row, each focusing its agent.
-  iconCard(t, fid, items) {
-    return h_flex().id(`ic-${fid}`).ml(18).mr(4).my(4).px(10).h(40).flex_none().gap(10).items_center().rounded(8).border_1().border_color(t.border)
-      .overflow_x_scrollbar()
-      .children(items.map((x) => h_flex().id(`ici-${fid}-${x.a.address}`).gap(3).items_center().px(3).rounded(5).hover((st) => st.bg(t.hover))
-        .tooltip(this.title(x))
-        .on_click(() => this.focus(x))
-        .child(this.statusGlyph(t, x, 11))
-        .child(this.icon(t, x, 16))))
-      .child(div().flex_1())
-      .child(div().text_color(t.dim).child("›"));
+  // A folded space or worktree: its most urgent agents' status and icon inline on its row, each focusing its agent.
+  inlineIcons(t, fid, items, max) {
+    const more = items.length - max;
+    const urgent = [...items].sort((p, q) => (q.failed - p.failed) || RANK[q.a.status] - RANK[p.a.status]);
+    return h_flex().id(`ii-${fid}`).flex_none().gap(2).items_center()
+      .children(urgent.slice(0, max).map((x) => h_flex().id(`ii-${fid}-${x.a.address}`).gap(2).items_center().px(2).rounded(4)
+        .hover((st) => st.bg(t.hover)).tooltip(this.title(x))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); this.focus(x); })
+        .child(this.statusGlyph(t, x, 10))
+        .child(this.icon(t, x, 14))))
+      .when(more > 0, (el) => el.child(div().pl(2).text_size(11).text_color(t.dim).child(`+${more}`)));
   }
 
   pushAgent(t, rows, order, x, kidsOf, now, depth) {

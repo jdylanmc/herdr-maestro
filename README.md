@@ -50,7 +50,7 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   **workers** (`maestro spawn` / `hc run`), indented like an outline. As in Herdr's spaces list,
   a worktree space sits under its repo's space with a branch icon; a space's branch button offers
   New / Open / Remove worktree (Herdr's dialogs; Remove only when clean with no agent in it). Folding a space or worktree
-  leaves an icon card of its agents.
+  shows its agents' status and icon inline on its row (click one to focus it) instead of their cards.
 - Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
   its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
