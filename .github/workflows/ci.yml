@@ -37,8 +37,11 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
 
   test:
-    name: Syntax, JSON, and unit tests
-    runs-on: ubuntu-latest
+    name: Syntax, JSON, and unit tests (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
