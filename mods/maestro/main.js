@@ -6,7 +6,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
 import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings, knownAgents } from "herdr";
 import * as fs from "fs/promises";
-import { emptySession, applyLines, treeRows, attention, nextRun, cadence } from "./log.js";
+import { emptySession, applyLines, treeRows, visibleRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
 import { liveAgents } from "./live.js";
 import { pinFirst, alertStep, NEEDS_YOU } from "./alerts.js";
@@ -573,7 +573,7 @@ export default class Maestro extends View {
         .child(div().flex_1())
         .child(icon("m-new", "folder-plus", "New space", () => run("space.new")))
         .child(this.alertToggles(t))
-        .child(icon("m-finished", shared("maestro.showFinished") ? "circle-check" : "clock", shared("maestro.showFinished") ? "Showing finished tasks for 24 h" : "Finished tasks hide after 10 min", () => setShared("maestro.showFinished", !shared("maestro.showFinished"))))
+        .child(icon("m-finished", shared("maestro.showFinished") ? "circle-check" : "clock", shared("maestro.showFinished") ? "Showing idle and finished subagents (finished for 24 h)" : "Showing running subagents only", () => setShared("maestro.showFinished", !shared("maestro.showFinished"))))
         .child(icon("m-theme", "mods/maestro/palette.svg", "Theme", () => this.openThemes()))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .when(!narrow, (el) => el.child(this.segments(t, proj)))
@@ -914,7 +914,8 @@ export default class Maestro extends View {
 
   pushAgent(t, rows, order, x, kidsOf, now, depth) {
     order.push(x.a.address);
-    const tasks = x.s ? treeRows(x.s, now, keepMs()) : [];
+    // Only running subagents by default; "show finished" also lists idle and finished ones.
+    const tasks = visibleRows(x.s ? treeRows(x.s, now, keepMs()) : [], Boolean(shared("maestro.showFinished")));
     const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
     rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 2, bottom: 2 }));
@@ -924,9 +925,9 @@ export default class Maestro extends View {
       rows.push(h_flex().id(tid).ml(14 + depth * 14).pl(26).py(2).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => this.fold(tid, cx))
         .child(div().w(10).text_size(10).child(open ? "⌄" : "›"))
-        .child(`${tasks.length} subagent${tasks.length > 1 ? "s" : ""}`)
-        .children(["running", "idle", "failed"].map((st) => [st, tasks.filter((r) => r.status === st).length]).filter(([, n]) => n)
-          .map(([st, n]) => div().text_color(st === "running" ? t.working : st === "failed" ? t.blocked : t.dim).child(`· ${n} ${st}`)))
+        .child(shared("maestro.showFinished") ? `${tasks.length} subagent${tasks.length > 1 ? "s" : ""}` : `${tasks.length} running subagent${tasks.length > 1 ? "s" : ""}`)
+        .when(Boolean(shared("maestro.showFinished")), (el) => el.children(["running", "idle", "failed"].map((st) => [st, tasks.filter((r) => r.status === st).length]).filter(([, n]) => n)
+          .map(([st, n]) => div().text_color(st === "running" ? t.working : st === "failed" ? t.blocked : t.dim).child(`· ${n} ${st}`))))
         .when(!open, (el) => el.child(h_flex().gap(4).children(tasks.slice(0, 8).map((r) => this.taskGlyph(t, r))))));
       if (open) tasks.forEach((r, i) => rows.push(this.taskRow(t, x, r, now, depth, i === tasks.length - 1)));
     }

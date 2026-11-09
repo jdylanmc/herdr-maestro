@@ -153,6 +153,22 @@ export function treeRows(s, now, keepMs) {
   return rows;
 }
 
+// Rows to list: all of them, or only running ones; a running child of a hidden
+// parent moves up to its nearest shown ancestor's level.
+export function visibleRows(rows, showAll) {
+  if (showAll) return rows;
+  const out = [];
+  const anc = [];
+  for (const r of rows) {
+    const up = r.depth ? anc[r.depth - 1] ?? -1 : -1;
+    if (r.status === "running") {
+      out.push({ ...r, depth: up + 1 });
+      anc[r.depth] = up + 1;
+    } else anc[r.depth] = up;
+  }
+  return out;
+}
+
 export function attention(s) {
   if (s.perms.size) return "permission";
   if (s.asks.size) return "question";
