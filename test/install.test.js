@@ -61,12 +61,12 @@ test("native install leaves another status line intact and rejects invalid setti
   assert.equal(readFileSync(join(copilot, "settings.json"), "utf8"), "{bad");
 });
 
-test("native install refuses a conflicting shortcut before writing settings or mods", (t) => {
+for (const section of ["global", "layout:maestro"]) test(`native install refuses a conflicting ${section} shortcut before writing settings or mods`, (t) => {
   const home = scratch(t);
   const app = join(home, "herdr");
   const copilot = join(home, "copilot");
   mkdirSync(app, { recursive: true });
-  const keys = JSON.stringify({ global: { f2: "tab.rename" } });
+  const keys = JSON.stringify({ [section]: { f2: "tab.rename" } });
   writeFileSync(join(app, "keys.json"), keys);
   assert.throws(() => install({ app, copilot, bin: join(home, "bin"), key: "f2", check: false }), /already bound/);
   assert.equal(readFileSync(join(app, "keys.json"), "utf8"), keys);

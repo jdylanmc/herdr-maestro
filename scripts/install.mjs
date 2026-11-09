@@ -81,8 +81,12 @@ export function install({
   if (keys.global[key] && keys.global[key] !== "layout.switch:maestro") {
     throw new Error(`${key} is already bound to ${keys.global[key]}; choose MAESTRO_KEY`);
   }
+  const back = `layout.switch:${returnLayout}`;
+  if (keys["layout:maestro"][key] && keys["layout:maestro"][key] !== back) {
+    throw new Error(`${key} is already bound to ${keys["layout:maestro"][key]} in layout:maestro; choose MAESTRO_KEY`);
+  }
   keys.global[key] = "layout.switch:maestro";
-  keys["layout:maestro"][key] = `layout.switch:${returnLayout}`;
+  keys["layout:maestro"][key] = back;
   for (const [letter, action] of [["b", "board"], ["t", "tags"], ["k", "pets"]]) {
     keys["layout:maestro"][`${windows ? "ctrl" : "cmd"}-shift-${letter}`] ??= `maestro.${action}`;
   }
