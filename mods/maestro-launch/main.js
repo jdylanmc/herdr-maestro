@@ -23,7 +23,7 @@ export default class MaestroLaunch extends View {
     const machine = spaces().find((s) => s.id === this.space)?.machine ?? null;
     this.local = !machine;
     this.agents = this.local ? shared(KNOWN)?.agents ?? [] : [];
-    this.sel = 0;
+    this.selKey = "agent:copilot"; // the selected row by identity: rows change when discovery resolves
     this.pick = "copilot"; // the agent "In another folder…" starts: the last one selected
     this.handle = cx.focus_handle();
     this.handle.focus();
@@ -63,7 +63,9 @@ export default class MaestroLaunch extends View {
   render() {
     const t = theme();
     const items = launchItems(this.agents, { local: this.local });
-    if (!items[this.sel]?.ok) this.sel = 0;
+    const rowKey = (it) => `${it.kind}:${it.key}`;
+    let sel = items.findIndex((it) => it.ok && rowKey(it) === this.selKey);
+    if (sel < 0) { sel = 0; this.selKey = rowKey(items[0]); }
     const picked = items.find((it) => it.kind === "agent" && it.key === this.pick) ?? items[0];
     const icon = (a) => a.kind === FOLDER ? svg("mods/workspace-chrome/folder.svg").size(14).flex_none().text_color(t.foreground)
       : !a.icon ? div().w(14).flex_none() : a.tint ? svg(a.icon).size(14).flex_none().text_color(t.foreground) : image(a.icon).size(14).flex_none();
@@ -73,12 +75,13 @@ export default class MaestroLaunch extends View {
         if (e.modifiers.control || e.modifiers.platform || e.modifiers.alt) return;
         if (e.key === "escape") { closeOverlay(props().overlay); return; }
         if (e.key === "down" || e.key === "up") {
-          this.sel = moveSelection(items, this.sel, e.key === "down" ? 1 : -1);
-          if (items[this.sel].kind === "agent") this.pick = items[this.sel].key;
+          const it = items[moveSelection(items, sel, e.key === "down" ? 1 : -1)];
+          this.selKey = rowKey(it);
+          if (it.kind === "agent") this.pick = it.key;
           cx.notify();
           return;
         }
-        if (e.key === "enter") { this.choose(items, items[this.sel]); return; }
+        if (e.key === "enter") { this.choose(items, items[sel]); return; }
         const a = /^[1-9]$/.test(e.key) ? items.find((it) => it.hotkey === e.key) : null;
         if (a) this.start(a);
       })
@@ -88,7 +91,7 @@ export default class MaestroLaunch extends View {
           ...(it.kind === FOLDER ? [div().mx(9).my(3).h(1).flex_none().bg(t.border)] : []),
           h_flex().id(`agent-${it.key}`).h(31).px(9).gap(10).rounded(7).items_center().flex_none()
             .text_color(it.ok ? t.foreground : t.dim)
-            .when(i === this.sel, (el) => el.bg(t.selected))
+            .when(i === sel, (el) => el.bg(t.selected))
             .when(it.ok, (el) => el.hover((s) => s.bg(t.selected)).on_click(() => this.choose(items, it)))
             .child(icon(it))
             .child(div().flex_1().min_w(0).truncate().child(it.name ?? it.key))

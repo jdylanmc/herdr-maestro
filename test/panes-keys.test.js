@@ -130,9 +130,7 @@ test("launch menu: Enter starts Copilot; In another folder hands the selected ag
     const menu = loadMod("maestro-launch", { spaceList: [space], modProps: { space: "s1", folder: "/here", overlay: "o" } });
     menu.mod.agents = agents;
     let onKey;
-    menu.mod.handle = {};
-    const el = menu.mod.render();
-    const key = (k) => { onKey ??= el.events.key; onKey({ key: k, modifiers: {} }, menu.cx); menu.mod.render(); };
+    const key = (k) => { onKey = menu.mod.render().events.key; onKey({ key: k, modifiers: {} }, menu.cx); };
     return { menu, key };
   };
   const a = open();
@@ -147,6 +145,14 @@ test("launch menu: Enter starts Copilot; In another folder hands the selected ag
   assert.equal(b.menu.commands.length, 0);
   const req = b.menu.store.get("maestro.launchInFolder");
   assert.deepEqual(Array.from(req.argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "claude"]);
+
+  const late = open();
+  late.menu.mod.agents = [];
+  late.key("down"); // [Copilot, In another folder…]: the folder row
+  late.menu.mod.agents = agents; // discovery resolves: Claude now sits where the folder row was
+  late.key("enter");
+  assert.equal(late.menu.commands.length, 0, "Enter still means the folder row");
+  assert.deepEqual(Array.from(late.menu.store.get("maestro.launchInFolder").argv), ["node", "/local-herdr/mods/maestro/helper.mjs", "run", "copilot", "--yolo"]);
 
   const board = loadMod("maestro", { spaceList: [space], pickFolder: async () => "/picked" });
   board.mod.launchInFolderState();
