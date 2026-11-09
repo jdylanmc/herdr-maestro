@@ -1,10 +1,6 @@
 {
   "id": "root",
   "type": "row",
-  "theme": {
-    "light": "herdr-catppuccin-latte",
-    "dark": "herdr-catppuccin"
-  },
   "titlebar": "none",
   "terminal_menu": "maestro-menu",
   "traffic_lights": [
@@ -115,7 +111,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs-graph"
+            "mod": "tabs"
           },
           "children": []
         },

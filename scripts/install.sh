@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 HERDR="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 COPILOT="${COPILOT_HOME:-$HOME/.copilot}"
 KEY="${MAESTRO_KEY:-cmd-shift-m}"
-RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-catppuccin}"
+RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-main}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/mods/maestro-launch" "$HERDR/mods/maestro-menu" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
@@ -28,6 +28,25 @@ link "$ROOT/mods/maestro-tags" "$HERDR/mods/maestro-tags"
 link "$ROOT/mods/maestro-pets" "$HERDR/mods/maestro-pets"
 link "$ROOT/mods/maestro-launch" "$HERDR/mods/maestro-launch"
 link "$ROOT/mods/maestro-menu" "$HERDR/mods/maestro-menu"
+
+# Herdr refuses a layout that names a missing mod and silently shows its default view instead.
+python3 - "$ROOT/layouts/maestro.json" "$HERDR/mods" "$ROOT/scripts/lib/herdr-mods.json" <<'PY'
+import json, os, sys
+layout, mods, shipped = sys.argv[1:]
+shipped = set(json.load(open(shipped)))
+found = set()
+def walk(n):
+    if isinstance(n, dict):
+        if isinstance(n.get("mod"), str): found.add(n["mod"])
+        for v in n.values(): walk(v)
+    elif isinstance(n, list):
+        for v in n: walk(v)
+walk(json.load(open(layout)))
+missing = sorted(m for m in found if m not in shipped and not os.path.isdir(os.path.join(mods, m)))
+if missing:
+    sys.exit(f"error: {layout} needs mods that are not installed in {mods}: {', '.join(missing)}\n"
+             "Herdr would refuse the Maestro layout and fall back to its default view.")
+PY
 mkdir -p "$HOME/.local/bin" "$COPILOT/skills"
 link "$ROOT/bin/maestro" "$HOME/.local/bin/maestro"
 link "$ROOT/skills/herdr-maestro" "$COPILOT/skills/herdr-maestro"
