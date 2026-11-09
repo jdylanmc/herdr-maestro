@@ -15,6 +15,7 @@ import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, 
 import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
 import { spaceFill, inkOn } from "./spacecolor.js";
+import { pastThreshold, canDrop, moveKey, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex } from "./reorder.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
@@ -521,7 +522,10 @@ export default class Maestro extends View {
     const order = [];
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
-    for (const { sp, tree } of this.nestedSpaces()) {
+    const spaceList = this.nestedSpaces();
+    this.dragItems = new Map();
+    this.registerSpaces(spaceList);
+    for (const { sp, tree } of spaceList) {
       if (sp.header) {
         this.nav.push({ key: sp.id });
         rows.push(this.navRow(t, sp.id, this.machineHeader(t, sp, roots, kidsOf, order, narrow), { top: 4 }));
@@ -537,7 +541,7 @@ export default class Maestro extends View {
       }
       if (proj !== "worktrees") {
         const group = [];
-        for (const x of mine.sort(urgent)) this.pushAgent(t, group, order, x, kidsOf, now, 0);
+        for (const x of this.arrangeAgents(`sp:${sp.id}`, mine.sort(urgent))) this.pushAgent(t, group, order, x, kidsOf, now, 0);
         if (group.length) rows.push(this.guide(t, `g-${sp.id}`, 15, group));
         continue;
       }
@@ -547,9 +551,11 @@ export default class Maestro extends View {
         if (!trees.has(k)) trees.set(k, { g: this.gitOf(x.cwd, x.machine), cwd: x.cwd, items: [] });
         trees.get(k).items.push(x);
       }
-      for (const [k, tr] of trees) {
+      const treeKeys = arrange([...trees.keys()].map((k) => `wt:${sp.id}:${k}`), (f) => f, shared("maestro.treeOrder"));
+      this.register("tree", sp.id, treeKeys);
+      for (const [k, tr] of arrange([...trees], ([k]) => `wt:${sp.id}:${k}`, shared("maestro.treeOrder"))) {
         const fid = `wt:${sp.id}:${k}`;
-        const sorted = tr.items.sort(urgent);
+        const sorted = this.arrangeAgents(fid, tr.items.sort(urgent));
         const group = [];
         const at = this.nav.length;
         if (this.folded.has(fid)) for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address));
@@ -566,7 +572,9 @@ export default class Maestro extends View {
     const icon = (id, name, tip, on) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_click(on)
       .child(svg(name.includes("/") ? name : `mods/workspace-chrome/${name}.svg`).size(14));
-    return v_flex().id("maestro").when(this.kb, (el) => el.track_focus(this.handle).on_key_down((e, cx) => this.navKey(e, cx))).size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
+    return v_flex().id("maestro").when(this.kb, (el) => el.track_focus(this.handle).on_key_down((e, cx) => this.navKey(e, cx)))
+      .when(!this.kb && Boolean(this.drag?.moved), (el) => el.track_focus(this.handle).on_key_down((e, cx) => { if (e.key === "escape") { this.endDrag(); cx.stop_propagation(); cx.notify(); } }))
+      .size_full().min_h(0).bg(t.chrome).text_size(13).text_color(t.foreground)
       .when(!narrow, (el) => el.child(h_flex().pl(12).pr(6).pt(2).pb(4).gap(2).items_center()
         .child(div().text_size(15).font_semibold().child("Maestro"))
         .child(div().w(6))
@@ -579,6 +587,8 @@ export default class Maestro extends View {
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .when(!narrow, (el) => el.child(this.segments(t, proj)))
       .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 4).pb(6).overflow_y_scrollbar().mode("always")
+        .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.endDrag(); cx.notify(); } })
+        .on_hover((on, cx) => { if (!on && this.drag) { this.endDrag(); cx.notify(); } })
         .when(spaces().length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No spaces yet.")))
         .children(rows))
       .when(!narrow, (el) => el.child(this.attentionStrip(t, list)));
@@ -753,9 +763,9 @@ export default class Maestro extends View {
       .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
     const menu = () => openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: sp.id } } });
     const g = this.gitOf(spacePlace(sp, panes()), sp.machine);
-    return v_flex().mt(tree ? 1 : 3).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(h_flex().id(`space-${sp.id}`).px(6).h(28).flex_none().gap(6).items_center().rounded(6)
+    return v_flex().mt(tree ? 1 : 3).flex_none().when(Boolean(tree), (el) => el.ml(14)).child(this.draggable(t, "space", sp.id, h_flex().id(`space-${sp.id}`).px(6).h(28).flex_none().gap(6).items_center().rounded(6)
       .when(sp.active, (el) => el.bg(t.selected)).hover((st) => st.bg(sp.active ? t.selected : t.hover))
-      .on_click(() => run("space.select", { id: sp.id }))
+      .on_click(() => { if (!this.dragged && !this.fromChild) run("space.select", { id: sp.id }); })
       .on_mouse_down("right", menu)
       .child(div().id(`spf-${sp.id}`).size(18).flex_none().flex().items_center().justify_center().rounded(4).border_1().border_color(t.border).text_color(t.dim)
         .hover((st) => st.text_color(t.foreground)).on_mouse_down("left", stop)
@@ -772,7 +782,7 @@ export default class Maestro extends View {
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
-      .child(this.newButton(t, `spn-${sp.id}`, sp.id, mine[0]?.cwd ?? sp.folder ?? null, 13)))
+      .child(this.newButton(t, `spn-${sp.id}`, sp.id, mine[0]?.cwd ?? sp.folder ?? null, 13))))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .when(open, (el) => el.child(div().mx(6).mt(2).h(1).flex_none().bg(t.border)));
   }
@@ -872,11 +882,11 @@ export default class Maestro extends View {
 
   railSpace(t, sp, mine) {
     const worst = mine.reduce((m, x) => (RANK[x.a.status] > RANK[m] ? x.a.status : m), "idle");
-    return h_flex().id(`rail-${sp.id}`).h(28).flex_none().justify_center().items_center().gap(4)
+    return this.draggable(t, "space", sp.id, h_flex().id(`rail-${sp.id}`).h(28).flex_none().justify_center().items_center().gap(4)
       .when(sp.active, (el) => el.bg(t.raised)).hover((st) => st.bg(t.hover))
-      .on_click(() => run("space.select", { id: sp.id }))
+      .on_click(() => { if (!this.dragged) run("space.select", { id: sp.id }); })
       .child(this.spaceAvatar(t, sp, 16, true))
-      .child(this.statusDot(t, worst));
+      .child(this.statusDot(t, worst)));
   }
 
   treeRow(t, fid, tr, kidsOf) {
@@ -887,8 +897,8 @@ export default class Maestro extends View {
     const detail = [g?.branch === "HEAD" ? "detached" : g?.branch, g?.tree].filter(Boolean).join(" · ");
     const all = this.flat(tr.items, kidsOf);
     const n = all.length;
-    return h_flex().id(fid).mt(2).pl(4).pr(6).py(2).flex_none().gap(6).items_center().rounded(6).hover((st) => st.bg(t.hover))
-      .on_click((_e, cx) => this.fold(fid, cx))
+    return this.draggable(t, "tree", fid, h_flex().id(fid).mt(2).pl(4).pr(6).py(2).flex_none().gap(6).items_center().rounded(6).hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => { if (!this.dragged && !this.fromChild) this.fold(fid, cx); })
       .child(div().w(10).text_size(10).text_color(t.dim).child(open ? "⌄" : "›"))
       .child(svg("mods/workspace-chrome/git-branch.svg").size(15).flex_none().text_color(t.muted))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
@@ -896,7 +906,7 @@ export default class Maestro extends View {
         .when(Boolean(detail), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
       .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
-      .child(this.newButton(t, `wtn-${fid}`, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null, 12));
+      .child(this.newButton(t, `wtn-${fid}`, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null, 12)));
   }
 
   // A space's or worktree's one +: the launch menu (Copilot first, other agents, another folder);
@@ -927,8 +937,9 @@ export default class Maestro extends View {
     return h_flex().id(`ii-${fid}`).flex_none().gap(2).items_center()
       .children(urgent.slice(0, max).map((x) => h_flex().id(`ii-${fid}-${x.a.address}`).gap(2).items_center().px(2).rounded(4)
         .hover((st) => st.bg(t.hover)).tooltip(this.title(x))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); this.focus(x); })
+        // The press reaches the row so a drag can start here; a click (no drag) still focuses the agent.
+        .on_mouse_down("left", () => { this.childPress = true; })
+        .on_click((_e, cx) => { cx.stop_propagation(); if (!this.dragged) this.focus(x); })
         .child(this.statusGlyph(t, x, 10))
         .child(this.icon(t, x, 14))))
       .when(more > 0, (el) => el.child(div().pl(2).text_size(11).text_color(t.dim).child(`+${more}`)));
@@ -938,7 +949,7 @@ export default class Maestro extends View {
     order.push(x.a.address);
     // Only running subagents by default; "show finished" also lists idle and finished ones.
     const tasks = visibleRows(x.s ? treeRows(x.s, now, keepMs()) : [], Boolean(shared("maestro.showFinished")));
-    const kids = (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true }));
+    const kids = this.arrangeAgents(`kids:${x.a.address}`, (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true })));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
     rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 1, bottom: 1 }));
     if (tasks.length) {
@@ -954,6 +965,86 @@ export default class Maestro extends View {
       if (open) tasks.forEach((r, i) => rows.push(this.taskRow(t, x, r, now, depth, i === tasks.length - 1)));
     }
     for (const k of kids) this.pushAgent(t, rows, order, k, kidsOf, now, depth + 1);
+  }
+
+  // ---- Drag to reorder: spaces (Herdr's own order, per machine), worktree groups and sibling agents (Maestro-only) ----
+  register(kind, group, keys, band = () => null) {
+    for (const id of keys) this.dragItems?.set(`${kind}:${id}`, { kind, id, group, band: band(id), keys });
+  }
+
+  // entries: nestedSpaces() rows ({ sp, tree }); worktree spaces reorder only under their parent.
+  registerSpaces(entries) {
+    for (const g of spaceGroups(entries)) this.dragItems?.set(`space:${g.id}`, { kind: "space", ...g });
+  }
+
+  // Siblings in their saved order (pinned first); registers them as one drag group.
+  arrangeAgents(group, items) {
+    const out = arrange(items, (x) => x.tagKey, shared("maestro.order"), (x) => x.a.pinned);
+    const pinned = new Map(out.map((x) => [x.tagKey, Boolean(x.a.pinned)]));
+    this.register("agent", group, out.map((x) => x.tagKey), (k) => pinned.get(k));
+    return out;
+  }
+
+  // As Herdr's spaces list: a press arms, a move past the threshold drags, an accent line shows where it lands
+  // (in the gap beside the row, so it shows between folded rows too).
+  draggable(t, kind, id, el) {
+    const item = this.dragItems?.get(`${kind}:${id}`);
+    if (!item) return el;
+    const d = this.drag?.moved && this.drag.kind === kind ? this.drag : null;
+    const edge = d && d.over === id ? lineEdge(d.keys, d.id, id) : null;
+    return el.relative()
+      .when(Boolean(d && d.id === id && d.over !== id), (e) => e.opacity(0.5))
+      .when(Boolean(edge), (e) => e.child(div().absolute().left(0).right(0).h(2).rounded(1).bg(t.accent)
+        .when(edge === "bottom", (l) => l.bottom(-2)).when(edge === "top", (l) => l.top(-2))))
+      .on_mouse_down("left", (e) => {
+        this.dragged = false;
+        this.fromChild = Boolean(this.childPress);
+        this.childPress = false;
+        this.drag = { ...item, start: e.position, moved: false, over: id };
+      })
+      .on_mouse_move((e, cx) => this.dragMove(kind, id, e, cx))
+      .on_mouse_up("left", (_e, cx) => this.dragDrop(kind, id, cx));
+  }
+
+  dragMove(kind, id, e, cx) {
+    const d = this.drag;
+    if (!d) return;
+    let changed = false;
+    if (!d.moved && pastThreshold(d.start, e.position)) {
+      d.moved = true;
+      this.dragged = true;
+      this.kb = false;
+      this.dragFocus = focused()?.pane ?? null;
+      this.handle.focus();
+      changed = true;
+    }
+    if (!d.moved) return;
+    const over = d.kind === kind && d.id === id ? id : canDrop(d, this.dragItems?.get(`${kind}:${id}`)) ? id : null;
+    if (over !== d.over) { d.over = over; changed = true; }
+    if (changed) cx.notify();
+  }
+
+  dragDrop(kind, id, cx) {
+    const d = this.drag;
+    if (!d) return;
+    this.endDrag();
+    if (d.moved && d.over === id && canDrop(d, this.dragItems?.get(`${kind}:${id}`))) {
+      if (kind === "space") {
+        const index = spaceMoveIndex(spaces().map((sp) => sp.id), d.id, id, lineEdge(d.keys, d.id, id));
+        if (index != null) run("space.move", { id: d.id, index });
+      } else setShared(kind === "tree" ? "maestro.treeOrder" : "maestro.order", mergeOrder(shared(kind === "tree" ? "maestro.treeOrder" : "maestro.order"), moveKey(d.keys, d.id, id)));
+    }
+    cx.notify();
+  }
+
+  // Cancels or finishes a drag; a drag that took the keyboard (for Escape) gives it back.
+  endDrag() {
+    const moved = this.drag?.moved;
+    this.drag = null;
+    if (!moved) return;
+    const pane = this.dragFocus;
+    this.dragFocus = null;
+    if (pane && !this.kb) try { run("pane.focus", { pane }); } catch {}
   }
 
   focus(x) { const st = find(layout(), "work-stack"); if (st && st.active && st.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
@@ -1000,7 +1091,7 @@ export default class Maestro extends View {
     const line = asks ? why : why ? `${why} · ${this.task(x)}` : this.task(x);
     const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(8).pr(6).py(4).gap(8).items_center().rounded(6).opacity(finished ? 0.6 : 1)
       .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
-      .on_click(() => this.focus(x))
+      .on_click(() => { if (!this.dragged) this.focus(x); })
       .on_hover((on, cx) => { if (on) this.readScreen(a.address); this.hoverCard(a.address, on, cx); })
       .when(a.focused, (el) => el.child(div().absolute().left(0).top(4).bottom(4).w(3).rounded(2).bg(t.working)))
       .child(this.icon(t, x, 20))
@@ -1019,13 +1110,13 @@ export default class Maestro extends View {
         .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
       .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
       .child(this.pet(x, 22));
-    return h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(1).pl(depth ? 8 : 0).flex_none().items_stretch()
+    return this.draggable(t, "agent", x.tagKey, h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(1).pl(depth ? 8 : 0).flex_none().items_stretch()
       .on_hover((on, cx) => { if (on) this.hovered = a.address; else if (this.hovered === a.address) this.hovered = null; cx.notify(); })
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
       .child(div().flex_1().min_w(0)
         .child(HoverCard.new(`hover-${a.address}`).open_delay(400).close_delay(120).anchor("left_center")
           .trigger(body)
-          .content(this.preview(t, x, now, why, tags))));
+          .content(this.preview(t, x, now, why, tags)))));
   }
 
   hoverCard(address, on, cx) {
