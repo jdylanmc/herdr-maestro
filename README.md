@@ -62,7 +62,8 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   human picks it: `shared("maestro.tagColors")` maps slug → Herdr theme color name (`ansi1`…`ansi6`,
   `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
 - Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there;
-  the folder button picks a folder first and starts Copilot in it.
+  the folder button picks a folder first and starts Copilot in it. Click (or right-click) a space's
+  avatar to pick its color: Herdr's six, theme colors, a custom `#rrggbb`, or Auto (Herdr picks again).
   A worktree's `+` starts Copilot in that worktree. The chevron beside either `+` lists every agent
   Herdr knows (`knownAgents()`: Claude Code, Codex, …, installed ones first) and starts the one you pick there.
 - **Any agent:** every terminal Herdr counts as an agent gets a card, status, task, tags, pet (mood from
@@ -115,7 +116,7 @@ Beats (scheduled prompts) with cadence, run count and next run.
 
 **Theming**: every color comes from the active Herdr theme (`theme()`): surfaces, status, tags and
 agent icons (theme color names such as `ansi4`, never fixed hex unless an agent asks for one), so
-any Herdr or layout theme, light or dark, applies. Space avatars use Herdr's own space colors.
+any Herdr or layout theme, light or dark, applies. Space avatars use Herdr's own space colors (`shared("space.colors")`, shared with Herdr's Spaces sidebar).
 
 ## Agent CLI
 
@@ -172,8 +173,8 @@ Background `--task` routing supports Copilot; other agents need explicit provide
 ## Layout
 
 - `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`, `mods/maestro-launch/` (agent menu), `mods/maestro-menu/`
-  (terminal right-click menu: Copy, Paste, then Herdr's items): Herdr app mods
-  (`mods/maestro-pets/petlib.js` is a copy of `mods/maestro/petlib.js`; mods cannot import across folders).
+  (terminal right-click menu: Copy, Paste, then Herdr's items), `mods/maestro-color/` (space color picker): Herdr app mods
+  (`mods/maestro-pets/petlib.js` and `mods/maestro-color/spacecolor.js` are copies of their `mods/maestro/` originals; mods cannot import across folders).
 - `layouts/maestro.json`: the Maestro layout.
 - `bin/`: `maestro` CLI and the status-line bridge.
 - `skills/herdr-maestro/`: Copilot skill for the CLI.

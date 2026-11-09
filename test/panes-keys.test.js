@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
+import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
 
 function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl } = {}) {
   let token = initialToken;
@@ -38,7 +39,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spaces: () => spaceList,
     machines: () => [],
     exec: execImpl,
-    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv,
+    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn,
     appHome: () => "/local-herdr",
     openOverlay: (spec) => { overlays.push(spec); },
     closeOverlay() {},
@@ -149,6 +150,15 @@ test("render refreshes a remote shell-only space with remote Git and no local lo
   assert.deepEqual(calls, [["git", sp.folder, "box"]]);
   assert.equal(mod.gitOf(sp.folder, "box").branch, "feature");
   assert.equal(mod.gitOf(sp.folder), null);
+});
+
+test("clicking a space's avatar opens its color picker instead of selecting the space", () => {
+  const sp = { id: "s1", name: "herdr" };
+  const board = loadMod("maestro", { spaceList: [sp] });
+  board.mod.spaceRow({}, sp, [], new Map());
+  board.click("spc-s1", null);
+  assert.deepEqual(board.overlays.map((o) => [o.mod, o.props.space]), [["maestro-color", "s1"]]);
+  assert.equal(board.commands.some((c) => c.command === "space.select"), false);
 });
 
 test("keyboard navigation can reopen a machine when every machine is folded", async () => {
