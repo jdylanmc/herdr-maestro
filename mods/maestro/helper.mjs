@@ -19,12 +19,22 @@ const [cmd, ...args] = process.argv.slice(2);
 
 // Maestro's view of a session log: only the event types it folds, without prompts, tool
 // arguments or results, so a log of any size answers within exec's 8 MiB output limit.
-const EVENT = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|resume|shutdown|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed|usage_record)|model\.model_call_success|user\.message|assistant\.turn_(start|end)|abort)"/;
+const EVENT = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|resume|shutdown|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed|usage_record)|model\.model_call_success|user\.message|assistant\.turn_(start|end)|abort|system\.notification)"/;
+// Of system notifications only subagent lifecycle ones (agent_idle ends a follow-up turn).
+const AGENT_KIND = /"kind":\{"type":"agent_/;
 const field = (line, k) => line.match(new RegExp(`"${k}":"([^"]*)"`))?.[1];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undefined).map((k) => [k, o[k]]));
 export function project(line) {
   const type = line.match(EVENT)?.[1];
   if (!type) return null;
+  if (type === "system.notification") {
+    if (!AGENT_KIND.test(line)) return null;
+    let e;
+    try { e = JSON.parse(line); } catch { return null; }
+    const k = e.data?.kind;
+    if (e.type !== type || typeof k?.type !== "string" || !k.type.startsWith("agent_")) return null;
+    return JSON.stringify({ type, timestamp: e.timestamp, data: { kind: pick(k, ["type", "agentId"]) } });
+  }
   const agentId = /"agentId":"/.test(line) ? field(line, "agentId") ?? true : undefined;
   if (type === "session.usage_record" || type === "model.model_call_success") {
     // Huge lines: read three fields without parsing.

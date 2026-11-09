@@ -1,6 +1,6 @@
 // Folds a Copilot session's events.jsonl into what Maestro shows. Pure: no herdr imports.
 
-const WANTED = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|resume|shutdown|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"/;
+const WANTED = /"type":"(subagent\.(started|configured|completed|failed)|permission\.(requested|completed)|tool\.execution_(start|complete)|session\.(start|resume|shutdown|model_change|error|schedule_created|schedule_cancelled|schedule_rearmed)|user\.message|assistant\.turn_(start|end)|abort)"|"kind":\{"type":"agent_idle"/;
 
 export function emptySession() {
   return { agents: new Map(), perms: new Set(), asks: new Set(), effort: null, model: null, lastModel: null, schedules: new Map(), lastPromptAt: null, started: null, turnStart: null, error: null };
@@ -96,6 +96,18 @@ export function applyEvent(s, e) {
       if (d.totalTokens != null) a.tokens = d.totalTokens;
       break;
     }
+    // A follow-up turn ends with no second subagent.completed; Copilot only notifies the
+    // parent. Ignore a late notice for an agent already woken by a newer message.
+    case "system.notification": {
+      const a = d.kind?.type === "agent_idle" && s.agents.get(d.kind.agentId);
+      if (!a || a.status !== "running" || a.lastType !== "assistant.turn_end") break;
+      a.status = "idle";
+      a.ended = t;
+      a.lastAt = t ?? a.lastAt;
+      a.activity = null;
+      a.activityCall = null;
+      break;
+    }
     case "permission.requested": if (d.requestId) s.perms.add(d.requestId); break;
     case "permission.completed": s.perms.delete(d.requestId); break;
     case "tool.execution_start":
@@ -126,6 +138,7 @@ function trackAgent(s, e, d, t) {
     a.activityCall = null;
   }
   a.lastAt = t ?? a.lastAt;
+  a.lastType = e.type;
   // Permission and question tracking still applies to the whole session.
   return !(e.type.startsWith("permission.") || e.type.startsWith("tool.execution"));
 }
