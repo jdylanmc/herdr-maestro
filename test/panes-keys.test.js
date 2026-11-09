@@ -6,6 +6,7 @@ import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
 import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
 import { launchItems, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
+import * as reorder from "../mods/maestro/reorder.js";
 
 function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder } = {}) {
   let token = initialToken;
@@ -46,7 +47,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spaces: () => spaceList,
     machines: () => [],
     exec: execImpl,
-    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn,
+    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ...reorder,
     appHome: () => "/local-herdr",
     openOverlay: (spec) => { overlays.push(spec); },
     closeOverlay() {},
@@ -250,6 +251,84 @@ test("keyboard navigation can reopen a machine when every machine is folded", as
   assert.equal(mod.folded.has("mc:box"), false);
   mod.render(cx);
   assert.ok(mod.nav.some((n) => n.key === "sp:box/s1"));
+});
+
+// A row as draggable() wires it: its press, move and release handlers.
+function dragRow(mod, kind, id) {
+  const h = {};
+  const el = new Proxy({}, { get: (_t, key) => (...args) => {
+    if (key === "on_mouse_down") h.down = args[1];
+    else if (key === "on_mouse_move") h.move = args[0];
+    else if (key === "on_mouse_up") h.up = args[1];
+    return el;
+  } });
+  mod.draggable({}, kind, id, el);
+  return h;
+}
+
+test("dragging BETA onto ALPHA runs Herdr's space.move; a short press stays a click; machines don't mix", () => {
+  const list = [{ id: "alpha", name: "ALPHA" }, { id: "beta", name: "BETA" }, { id: "box/s1", name: "Remote", machine: "box" }];
+  const { mod, cx, commands } = loadMod("maestro", { spaceList: list });
+  mod.dragItems = new Map();
+  mod.registerSpaces(list.map((sp) => ({ sp, tree: null })));
+  const [alpha, beta, remote] = list.map((sp) => dragRow(mod, "space", sp.id));
+  beta.down({ position: { x: 5, y: 40 } });
+  beta.move({ position: { x: 6, y: 41 } }, cx);
+  beta.up({}, cx);
+  assert.equal(mod.dragged, false, "a click under the threshold still selects");
+  assert.equal(commands.length, 0);
+  beta.down({ position: { x: 5, y: 40 } });
+  alpha.move({ position: { x: 5, y: 8 } }, cx);
+  assert.equal(mod.drag.over, "alpha");
+  alpha.up({}, cx);
+  assert.deepEqual(commands.at(-1), { command: "space.move", args: { id: "beta", index: 1 } });
+  assert.equal(mod.dragged, true, "the release is not also a click");
+  assert.equal(mod.drag, null);
+  remote.down({ position: { x: 5, y: 80 } });
+  alpha.move({ position: { x: 5, y: 8 } }, cx);
+  alpha.up({}, cx);
+  assert.equal(commands.length, 1, "another machine's space never lands here");
+});
+
+test("a folded space drags from its inline agent glyphs; a plain click there still focuses the agent", () => {
+  const list = [{ id: "alpha", name: "ALPHA" }, { id: "beta", name: "BETA" }];
+  const { mod, cx, commands, elements } = loadMod("maestro", { spaceList: list });
+  mod.dragItems = new Map();
+  mod.registerSpaces(list.map((sp) => ({ sp, tree: null })));
+  const focusedAgents = [];
+  mod.focus = (x) => focusedAgents.push(x.a.address);
+  const x = { a: { address: "t5", status: "working" }, rec: {}, tagKey: "t5", failed: false };
+  mod.inlineIcons({}, "sp:beta", [x], 1);
+  const glyph = elements.get("ii-sp:beta-t5").events;
+  const [alpha, beta] = list.map((sp) => dragRow(mod, "space", sp.id));
+  const press = (y) => { let stopped = false; glyph.down({ position: { x: 90, y } }, { stop_propagation() { stopped = true; } }); assert.equal(stopped, false); beta.down({ position: { x: 90, y } }); };
+  press(40);
+  beta.up({}, cx);
+  glyph.click({}, cx);
+  assert.deepEqual(focusedAgents, ["t5"]);
+  assert.equal(mod.fromChild, true, "the row's own click (select space) stays out of a glyph click");
+  press(40);
+  alpha.move({ position: { x: 90, y: 6 } }, cx);
+  alpha.up({}, cx);
+  glyph.click({}, cx);
+  assert.deepEqual(commands.at(-1), { command: "space.move", args: { id: "beta", index: 1 } });
+  assert.deepEqual(focusedAgents, ["t5"], "a drag from a glyph doesn't focus its agent");
+});
+
+test("dragging an agent above its sibling saves the Maestro order; pinned agents stay apart", () => {
+  const { mod, cx, store } = loadMod("maestro");
+  mod.dragItems = new Map();
+  const card = (k, pinned = false) => ({ tagKey: k, a: { pinned } });
+  const shown = mod.arrangeAgents("wt:alpha:~/git", [card("pin", true), card("lead"), card("themes")]);
+  assert.deepEqual(shown.map((x) => x.tagKey), ["pin", "lead", "themes"]);
+  const [pin, lead, themes] = ["pin", "lead", "themes"].map((k) => dragRow(mod, "agent", k));
+  themes.down({ position: { x: 0, y: 60 } });
+  pin.move({ position: { x: 0, y: 2 } }, cx);
+  assert.equal(mod.drag.over, null, "an unpinned agent can't drop among pinned ones");
+  lead.move({ position: { x: 0, y: 30 } }, cx);
+  lead.up({}, cx);
+  assert.deepEqual(store.get("maestro.order"), ["pin", "themes", "lead"]);
+  assert.deepEqual(mod.arrangeAgents("wt:alpha:~/git", [card("pin", true), card("lead"), card("themes")]).map((x) => x.tagKey), ["pin", "themes", "lead"]);
 });
 
 for (const initialToken of [undefined, 100]) {
