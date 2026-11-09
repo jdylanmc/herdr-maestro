@@ -9,7 +9,7 @@ KEY="${MAESTRO_KEY:-cmd-shift-m}"
 RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-catppuccin}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/mods/maestro-launch" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
+  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/mods/maestro-launch" "$HERDR/mods/maestro-menu" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
     if [[ -L "$p" && "$(readlink "$p")" == "$ROOT"* ]]; then rm "$p"; echo "removed $p"; fi
   done
   python3 "$ROOT/scripts/lib/uninstall.py" "$COPILOT/settings.json" "$HERDR/keys.json"
@@ -27,6 +27,7 @@ link "$ROOT/mods/maestro" "$HERDR/mods/maestro"
 link "$ROOT/mods/maestro-tags" "$HERDR/mods/maestro-tags"
 link "$ROOT/mods/maestro-pets" "$HERDR/mods/maestro-pets"
 link "$ROOT/mods/maestro-launch" "$HERDR/mods/maestro-launch"
+link "$ROOT/mods/maestro-menu" "$HERDR/mods/maestro-menu"
 mkdir -p "$HOME/.local/bin" "$COPILOT/skills"
 link "$ROOT/bin/maestro" "$HOME/.local/bin/maestro"
 link "$ROOT/skills/herdr-maestro" "$COPILOT/skills/herdr-maestro"
@@ -71,4 +72,5 @@ PY
 herdr-app check "$ROOT/mods/maestro"
 herdr-app check "$ROOT/mods/maestro-tags"
 herdr-app check "$ROOT/mods/maestro-pets"
+herdr-app check "$ROOT/mods/maestro-menu"
 echo "Maestro installed. $KEY toggles the maestro layout. Restart Copilot sessions to enable the status-line bridge."

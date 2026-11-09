@@ -170,7 +170,8 @@ Background `--task` routing supports Copilot; other agents need explicit provide
 
 ## Layout
 
-- `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`, `mods/maestro-launch/` (agent menu): Herdr app mods
+- `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`, `mods/maestro-launch/` (agent menu), `mods/maestro-menu/`
+  (terminal right-click menu: Copy, Paste, then Herdr's items): Herdr app mods
   (`mods/maestro-pets/petlib.js` is a copy of `mods/maestro/petlib.js`; mods cannot import across folders).
 - `layouts/maestro.json`: the Maestro layout.
 - `bin/`: `maestro` CLI and the status-line bridge.

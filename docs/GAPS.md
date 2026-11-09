@@ -123,6 +123,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** Copilot background tasks retain `-i`. Other agents can start background sessions without a task, or use explicit provider argv; generic background tasks fail before creating a checkout rather than silently losing the prompt.
 **Closes with:** provider-neutral task routing for `hc run`.
 
+### G-21 - SVGs inside a symlinked mod folder do not render
+
+**Wanted:** ship Copy and Paste icons in `mods/maestro-menu/`.
+**Evidence:** with the mod symlinked into the Herdr home (as `install.sh` does), `svg("mods/maestro-menu/copy.svg")` and `svg("mods/maestro/copy.svg")` drew nothing in `herdr-app shot`, after recreating the pane; `svg("mods/workspace-chrome/files.svg")` in the same row drew.
+**Shipped:** the terminal menu uses shipped `workspace-chrome` icons.
+**Closes with:** resolving mod assets through symlinked mod folders.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`
