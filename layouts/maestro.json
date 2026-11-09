@@ -6,6 +6,7 @@
     "dark": "herdr-catppuccin"
   },
   "titlebar": "none",
+  "terminal_menu": "maestro-menu",
   "traffic_lights": [
     12,
     16

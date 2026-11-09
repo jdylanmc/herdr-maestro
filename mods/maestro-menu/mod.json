@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Maestro terminal menu",
+  "overlay": { "width": 240, "height": 320 },
+  "cloned_from": {
+    "name": "menu",
+    "version": "0.1.14"
+  }
+}
