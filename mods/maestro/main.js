@@ -4,7 +4,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, HoverCard } from "gpui-base";
-import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings, knownAgents } from "herdr";
+import { agents, terminals, panes, spaces, machines, layout, run, theme, shared, setShared, exec, hc, home, appHome, watchFolder, setAgentOrder, readTextFile, writeTextFile, focused, notify, openOverlay, closeOverlay, props, nextCommand, themes, playSound, pickFolder, settings, knownAgents, window } from "herdr";
 import * as fs from "fs/promises";
 import { emptySession, applyLines, treeRows, visibleRows, attention, nextRun, cadence } from "./log.js";
 import { parseRead, screenLines, promptLine } from "./screen.js";
@@ -113,6 +113,7 @@ export default class Maestro extends View {
     this.board = this.view === "board";
     this.primary = this.view === "list";
     this.kbToken = shared("maestro.kbFocus");
+    this.folderAt = shared("maestro.launchInFolder")?.at ?? null;
     this.cx = cx;
     this.handle = cx.focus_handle();
     if (this.view === "themes") { this.handle.focus(); cx.timer.after(400, () => this.handle.focus()); return; }
@@ -496,6 +497,7 @@ export default class Maestro extends View {
     if (this.view === "footer") return this.footer(t, list, now);
     this.refreshGit([...list, ...spaces().map((sp) => ({ cwd: spacePlace(sp, panes()), machine: sp.machine ?? null }))]);
     this.keyboardState();
+    this.launchInFolderState();
     this.nav = [];
     const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
     const hide = shared("maestro.hideFinished") ?? {};
@@ -635,11 +637,16 @@ export default class Maestro extends View {
     }
   }
 
-  newInFolder(sp) {
+  // The launch menu's "In another folder…" (local spaces only): the folder picker lives here,
+  // in the sidebar, since the menu closes first. Starts the argv the menu chose.
+  launchInFolderState() {
+    const req = shared("maestro.launchInFolder");
+    if (!this.primary || !req?.at || req.at === this.folderAt) return;
+    this.folderAt = req.at;
     this.cx?.spawn(async () => {
       let folder = null;
-      try { folder = await pickFolder({ prompt: "Start Copilot" }); } catch {}
-      if (folder) run("tab.new", { space: sp.id, folder, argv: copilotArgv() });
+      try { folder = await pickFolder({ prompt: `Start ${req.name ?? "agent"}` }); } catch {}
+      if (folder && Array.isArray(req.argv)) run("tab.new", { ...(req.space ? { space: req.space } : {}), folder, argv: req.argv });
     });
   }
 
@@ -765,11 +772,7 @@ export default class Maestro extends View {
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
-      .child(btn("spn", "New Copilot here", () => run("tab.new", { space: sp.id, ...(mine[0]?.cwd ? { folder: mine[0].cwd } : sp.folder ? { folder: sp.folder } : {}), argv: this.argvFor(sp.machine) }),
-        svg("mods/workspace-chrome/plus.svg").size(13)))
-      .child(btn("spa", "Start another agent here…", () => this.openLaunch(sp.id, mine[0]?.cwd ?? sp.folder ?? null),
-        svg("mods/workspace-chrome/chevron-down.svg").size(11)))
-      .when(!sp.machine, (el) => el.child(btn("sp-folder", "New Copilot in folder…", () => this.newInFolder(sp), svg("mods/workspace-chrome/folder.svg").size(13)))))
+      .child(this.newButton(t, `spn-${sp.id}`, sp.id, mine[0]?.cwd ?? sp.folder ?? null, 13)))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .when(open, (el) => el.child(div().mx(6).mt(2).h(1).flex_none().bg(t.border)));
   }
@@ -893,19 +896,22 @@ export default class Maestro extends View {
         .when(Boolean(detail), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
       .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
-      .child(this.launchButtons(t, fid, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null));
+      .child(this.newButton(t, `wtn-${fid}`, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null, 12));
   }
 
-  // A worktree's + starts Copilot in it; the chevron opens the menu of every agent Herdr knows.
-  launchButtons(t, id, space, folder) {
-    const btn = (k, tip, on, child) => div().id(`${k}-${id}`).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
-      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(tip).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { cx.stop_propagation(); on(); }).child(child);
-    return h_flex().flex_none().gap(1)
-      .child(btn("wtn", "New Copilot in this worktree", () => run("tab.new", { ...(space ? { space } : {}), ...(folder ? { folder } : {}), argv: this.argvFor(spaces().find((sp) => sp.id === space)?.machine) }),
-        svg("mods/workspace-chrome/plus.svg").size(12)))
-      .child(btn("wta", "Start another agent in this worktree…", () => this.openLaunch(space, folder),
-        svg("mods/workspace-chrome/chevron-down.svg").size(10)));
+  // A space's or worktree's one +: the launch menu (Copilot first, other agents, another folder);
+  // Alt-click starts Copilot there at once.
+  newButton(t, id, space, folder, icon) {
+    const alt = window()?.platform === "macos" ? "⌥" : "Alt";
+    return div().id(id).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+      .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(`New agent… (${alt}-click: Copilot here)`)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((e, cx) => { cx.stop_propagation(); if (e?.modifiers?.alt) this.newCopilot(space, folder); else this.openLaunch(space, folder); })
+      .child(svg("mods/workspace-chrome/plus.svg").size(icon));
+  }
+
+  newCopilot(space, folder) {
+    run("tab.new", { ...(space ? { space } : {}), ...(folder ? { folder } : {}), argv: this.argvFor(spaces().find((sp) => sp.id === space)?.machine) });
   }
 
   openLaunch(space, folder) {

@@ -61,11 +61,12 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   add it, click one of yours to pick its color. A color belongs to the slug everywhere and only the
   human picks it: `shared("maestro.tagColors")` maps slug → Herdr theme color name (`ansi1`…`ansi6`,
   `accent`, `working`, `blocked`, `done`), so it follows the theme; unset slugs hash to an ANSI hue.
-- Spaces keep Herdr's behavior: click to switch, right-click for the space menu, `+` starts Copilot there;
-  the folder button picks a folder first and starts Copilot in it. Click (or right-click) a space's
+- Spaces keep Herdr's behavior: click to switch, right-click for the space menu. Click (or right-click) a space's
   avatar (a nested worktree space's branch icon) to pick its color: Herdr's six, theme colors, a custom `#rrggbb`, or Auto (Herdr picks again).
-  A worktree's `+` starts Copilot in that worktree. The chevron beside either `+` lists every agent
-  Herdr knows (`knownAgents()`: Claude Code, Codex, …, installed ones first) and starts the one you pick there.
+  Each space and worktree has one `+`: it opens the launch menu, Copilot first and selected (Enter starts it),
+  then every other agent Herdr knows (`knownAgents()`: Claude Code, Codex, …, installed ones first; keys 1–9,
+  arrows, Esc), then **In another folder…** (local spaces only), which picks a folder and starts the selected
+  agent there. ⌥-click (Alt-click) the `+` to start Copilot there at once.
 - **Any agent:** every terminal Herdr counts as an agent gets a card, status, task, tags, pet (mood from
   its status), focus and a hover preview; without a Maestro icon it shows its program's icon. Model,
   context, AIC, subagents and Beats come from Copilot's status line and session log, so only Copilot shows them.
