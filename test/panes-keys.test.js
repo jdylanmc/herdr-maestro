@@ -109,7 +109,7 @@ for (const [machine, helper] of [[null, null], ["box", "/remote-herdr/mods/maest
       assert.equal(command.args.folder, "/checkout");
       assert.deepEqual(Array.from(command.args.argv), [...wrapper, ...(agent.key === "copilot" ? ["copilot", "--yolo"] : agent.run)]);
     }
-    board.mod.newButton({}, "wtn-worktree", space.id, "/checkout", 20);
+    board.mod.newButton({}, "wtn-worktree", space.id, "/checkout", 12);
     assert.equal(board.elements.get("wtn-worktree").events.tip, "New agent… (⌥-click: Copilot here)");
     board.click("wtn-worktree", null);
     assert.equal(board.overlays.at(-1).mod, "maestro-launch");

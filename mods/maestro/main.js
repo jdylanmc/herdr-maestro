@@ -772,7 +772,7 @@ export default class Maestro extends View {
       .when(Boolean(g), (el) => el.child(btn("spw", "Worktrees", () => this.toggleWorktreeMenu(sp, g), svg("mods/workspace-chrome/git-branch.svg").size(13)
         .when(this.wtMenu?.id === sp.id, (e) => e.text_color(t.accent)))))
       .child(btn("spm", "Space menu", menu, div().text_size(13).font_bold().child("…")))
-      .child(this.newButton(t, `spn-${sp.id}`, sp.id, mine[0]?.cwd ?? sp.folder ?? null, 22)))
+      .child(this.newButton(t, `spn-${sp.id}`, sp.id, mine[0]?.cwd ?? sp.folder ?? null, 13)))
       .when(Boolean(g) && this.wtMenu?.id === sp.id, (el) => el.child(this.worktreeMenu(t, sp, g)))
       .when(open, (el) => el.child(div().mx(6).mt(2).h(1).flex_none().bg(t.border)));
   }
@@ -896,18 +896,18 @@ export default class Maestro extends View {
         .when(Boolean(detail), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(11).font_family(MONO).text_color(t.dim).child(detail))))
       .when(!open && n > 0, (el) => el.child(this.inlineIcons(t, fid, all, 3)))
       .child(div().px(6).h(18).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).flex().items_center().child(String(n)))
-      .child(this.newButton(t, `wtn-${fid}`, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null, 20));
+      .child(this.newButton(t, `wtn-${fid}`, tr.items[0]?.a.space ?? null, g?.top ?? tr.cwd ?? null, 12));
   }
 
   // A space's or worktree's one +: the launch menu (Copilot first, other agents, another folder);
   // Alt-click starts Copilot there at once.
-  newButton(t, id, space, folder, size) {
+  newButton(t, id, space, folder, icon) {
     const alt = window()?.platform === "macos" ? "⌥" : "Alt";
-    return div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
+    return div().id(id).size(20).flex_none().flex().items_center().justify_center().rounded(5).text_color(t.dim)
       .hover((st) => st.bg(t.hover).text_color(t.foreground)).tooltip(`New agent… (${alt}-click: Copilot here)`)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((e, cx) => { cx.stop_propagation(); if (e?.modifiers?.alt) this.newCopilot(space, folder); else this.openLaunch(space, folder); })
-      .child(svg("mods/workspace-chrome/plus.svg").size(size > 20 ? 13 : 12));
+      .child(svg("mods/workspace-chrome/plus.svg").size(icon));
   }
 
   newCopilot(space, folder) {
