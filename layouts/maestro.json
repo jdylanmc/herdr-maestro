@@ -40,7 +40,8 @@
           "window_drag": true,
           "content": {
             "mod": "workspace-chrome"
-          }
+          },
+          "children": []
         },
         {
           "id": "maestro-stack",
@@ -63,7 +64,8 @@
               "min": 90,
               "content": {
                 "mod": "maestro"
-              }
+              },
+              "children": []
             },
             {
               "id": "maestro-footer",
@@ -78,7 +80,8 @@
                 "props": {
                   "view": "footer"
                 }
-              }
+              },
+              "children": []
             }
           ]
         },
@@ -93,7 +96,8 @@
             "props": {
               "footer": true
             }
-          }
+          },
+          "children": []
         }
       ]
     },
@@ -111,7 +115,8 @@
           "window_drag": true,
           "content": {
             "mod": "tabs-graph"
-          }
+          },
+          "children": []
         },
         {
           "id": "work-body",
@@ -151,7 +156,8 @@
                         "reveal": "always"
                       }
                     }
-                  }
+                  },
+                  "children": []
                 },
                 {
                   "id": "maestro-board",
@@ -161,14 +167,16 @@
                     "props": {
                       "view": "board"
                     }
-                  }
+                  },
+                  "children": []
                 },
                 {
                   "id": "maestro-pets",
                   "type": "block",
                   "content": {
                     "mod": "maestro-pets"
-                  }
+                  },
+                  "children": []
                 }
               ]
             },
@@ -192,21 +200,16 @@
                       "type": "block",
                       "content": {
                         "mod": "files"
-                      }
+                      },
+                      "children": []
                     },
                     {
                       "id": "changes",
                       "type": "block",
                       "content": {
                         "mod": "changes"
-                      }
-                    },
-                    {
-                      "id": "graph",
-                      "type": "block",
-                      "content": {
-                        "mod": "git-graph"
-                      }
+                      },
+                      "children": []
                     }
                   ]
                 }
@@ -222,7 +225,8 @@
           },
           "content": {
             "mod": "workspace-status"
-          }
+          },
+          "children": []
         }
       ]
     }
