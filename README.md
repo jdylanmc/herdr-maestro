@@ -24,7 +24,7 @@ Restart Copilot sessions after installing so they pick up the status-line bridge
 
 | Key | Action |
 |---|---|
-| `cmd-shift-m` | Toggle the Maestro layout (Catppuccin with the Maestro column) |
+| `cmd-shift-m` | Toggle the Maestro layout (Herdr's own look plus the Maestro column; no third-party layout or mods) and back to Herdr's `main` (`MAESTRO_RETURN_LAYOUT` overrides) |
 | `cmd-shift-b` | Show the board in the main area; again returns to the terminals (Maestro layout) |
 | `cmd-shift-t` | Edit tags of the focused session (Maestro layout) |
 | `cmd-shift-k` | Open the pet pokedex (Maestro layout; `cmd-shift-p` is Herdr's palette) |

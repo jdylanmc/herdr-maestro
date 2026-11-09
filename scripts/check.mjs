@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { missingMods } from "./lib/layout-mods.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const walk = (dir) => readdirSync(join(root, dir)).flatMap((n) => {
@@ -24,6 +25,11 @@ for (const p of scripts) {
 for (const p of json) {
   try { JSON.parse(readFileSync(join(root, p), "utf8")); }
   catch (e) { failed++; process.stderr.write(`${p}: ${e.message}\n`); }
+}
+for (const p of walk("layouts").filter((p) => p.endsWith(".json"))) {
+  let missing = [];
+  try { missing = missingMods(JSON.parse(readFileSync(join(root, p), "utf8")), root); } catch { continue; }
+  if (missing.length) { failed++; process.stderr.write(`${p}: mods neither shipped with Herdr nor in mods/: ${missing.join(", ")}\n`); }
 }
 if (failed) process.exit(1);
 console.log(`syntax ok: ${scripts.length} scripts; json ok: ${json.length} files`);
