@@ -64,7 +64,7 @@ export default class MaestroIcon extends View {
   key(e, cx, items) {
     if (e.key === "escape") closeOverlay(props()?.overlay);
     else if (this.typing) return;
-    else if (["right", "left", "down", "up"].includes(e.key)) this.at = pickerStep(this.at, e.key, items.length, Boolean(items[this.at]?.color));
+    else if (["right", "left", "down", "up"].includes(e.key)) this.at = pickerStep(this.at, e.key, items.length);
     else if (e.key === "enter" && this.at != null && items[this.at]) this.set(items[this.at].icon ? { icon: items[this.at].icon } : { color: items[this.at].color });
     else return;
     cx.stop_propagation();

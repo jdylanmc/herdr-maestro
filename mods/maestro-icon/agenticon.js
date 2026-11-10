@@ -75,14 +75,26 @@ export function pickerItems(colors) {
   return { items, icons: rows(items.filter((it) => it.icon), ICON_COLS), colors: rows(items.filter((it) => it.color), COLOR_COLS) };
 }
 
-// Focus after an arrow key: left/right step (wrapping), up/down move a row of icons or of colors.
-export function pickerStep(at, key, n, isColor) {
-  const row = isColor ? COLOR_COLS : ICON_COLS;
+// Focus after an arrow key over n items: left/right step (wrapping); up/down move a row in the same
+// column, crossing between the icon and color grids (different widths), clamped to a shorter row.
+export function pickerStep(at, key, n) {
   if (key === "right") return at == null ? 0 : (at + 1) % n;
   if (key === "left") return at == null ? n - 1 : (at + n - 1) % n;
-  if (key === "down") return at == null ? 0 : Math.min(n - 1, at + row);
-  if (key === "up") return at == null ? n - 1 : Math.max(0, at - row);
-  return at;
+  if (key !== "up" && key !== "down") return at;
+  if (at == null) return key === "down" ? 0 : n - 1;
+  const p = Object.keys(ICONS).length;
+  const grids = [{ base: 0, len: Math.min(p, n), w: ICON_COLS }, { base: p, len: Math.max(0, n - p), w: COLOR_COLS }];
+  const g = at < p ? 0 : 1;
+  const { base, w } = grids[g];
+  const row = Math.floor((at - base) / w);
+  const col = (at - base) % w;
+  const rows = (k) => Math.ceil(grids[k].len / grids[k].w);
+  const cell = (k, r) => {
+    const start = grids[k].base + r * grids[k].w;
+    return start + Math.min(col, grids[k].base + grids[k].len - start - 1);
+  };
+  if (key === "down") return row + 1 < rows(g) ? cell(g, row + 1) : g === 0 && rows(1) ? cell(1, 0) : at;
+  return row > 0 ? cell(g, row - 1) : g === 1 ? cell(0, rows(0) - 1) : at;
 }
 
 // The popup's size. Herdr sizes a popup to its content (`height` is only the most it grows to), so the
