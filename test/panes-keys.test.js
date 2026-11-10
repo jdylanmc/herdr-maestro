@@ -7,6 +7,7 @@ import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js
 import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
 import { launchItems, launchHeight, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
 import * as reorder from "../mods/maestro/reorder.js";
+import * as projection from "../mods/maestro/projection.js";
 
 function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder } = {}) {
   let token = initialToken;
@@ -47,7 +48,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spaces: () => spaceList,
     machines: () => [],
     exec: execImpl,
-    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ...reorder,
+    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ...reorder, ...projection,
     appHome: () => "/local-herdr",
     openOverlay: (spec) => { overlays.push(spec); },
     closeOverlay() {},
