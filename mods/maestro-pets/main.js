@@ -241,10 +241,12 @@ export default class MaestroPets extends View {
   // Cell 0 is "Default" (clears the agent's own choice); the rest are the rendered pets.
   pickCells() { return [null, ...this.pets.filter((p) => !p.error)]; }
 
+  // The agent's own choice's cell, Default when it has none; null when its pet has no cell
+  // (not loaded yet, removed or failed), so Enter cannot clear a choice nobody picked.
   pickChecked(cells) {
     const own = (shared("maestro.pets") ?? {})[props()?.key] ?? null;
     const i = own ? cells.findIndex((p) => p?.id === own) : 0;
-    return i < 0 ? 0 : i;
+    return i < 0 ? null : i;
   }
 
   // Closes only once choices.json has it; a failed save stays open and shows why.
@@ -271,7 +273,7 @@ export default class MaestroPets extends View {
   pickKey(e, cx, cells) {
     const at = this.pickCursor(cells) ?? this.pickChecked(cells);
     if (e.key === "escape") closeOverlay(props()?.overlay);
-    else if (e.key === "enter") { const c = cells[at]; if (at < cells.length) cx.spawn(async (cx) => { await this.pick(c, cx); }); }
+    else if (e.key === "enter") { if (at != null) { const c = cells[at]; cx.spawn(async (cx) => { await this.pick(c, cx); }); } }
     else if (["left", "right", "up", "down"].includes(e.key)) {
       const i = gridMove(at, e.key, cells.length, PICK.cols);
       this.cursor = i == null ? undefined : cells[i]?.id ?? null;

@@ -496,3 +496,32 @@ test("Enter in the pet picker never clears the choice when a reload removes the 
   assert.deepEqual(JSON.parse(file).sessions, { "sess-7": "koda" });
   assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "koda" });
 });
+
+for (const [what, setup] of [
+  ["the saved pet and the cursor's pet are removed by a reload", (pick) => {
+    pick.mod.pickKey({ key: "left" }, pick.cx, pick.mod.pickCells());
+    pick.mod.pickKey({ key: "right" }, pick.cx, pick.mod.pickCells());
+    assert.equal(pick.mod.cursor, "eve");
+    pick.mod.pets = pets.filter((p) => p.id !== "eve");
+  }],
+  ["the catalog has not loaded yet", (pick) => { pick.mod.pets = []; }],
+]) {
+  test(`Enter in the pet picker keeps a saved choice when ${what}`, async () => {
+    let writes = 0;
+    const extra = {
+      ...petlib, image: () => null,
+      readTextFile: async () => JSON.stringify({ default: null, sessions: { "sess-7": "eve" } }),
+      writeTextFile: async () => { writes++; },
+      fs: { mkdir: async () => {} },
+    };
+    const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+    pick.store.set("maestro.pets", { "sess-7": "eve" });
+    pick.mod.pets = pets;
+    setup(pick);
+    pick.mod.pickKey({ key: "enter" }, pick.cx, pick.mod.pickCells());
+    assert.equal(pick.tasks.length, 0);
+    assert.equal(writes, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "eve" });
+    assert.equal(pick.closed.length, 0);
+  });
+}
