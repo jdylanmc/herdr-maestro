@@ -7,7 +7,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, spaces, knownAgents, run, closeOverlay, props, shared, setShared, appHome } from "herdr";
-import { launchItems, moveSelection, FOLDER } from "./items.js";
+import { launchItems, launchHeight, moveSelection, FOLDER } from "./items.js";
 
 // Shared with the Maestro mod and read by `maestro spawn --agent` from shared.json.
 const KNOWN = "maestro.knownAgents";
@@ -69,7 +69,7 @@ export default class MaestroLaunch extends View {
     const picked = items.find((it) => it.kind === "agent" && it.ok && it.key === this.pick) ?? items[0];
     const icon = (a) => a.kind === FOLDER ? svg("mods/workspace-chrome/folder.svg").size(14).flex_none().text_color(t.foreground)
       : !a.icon ? div().w(14).flex_none() : a.tint ? svg(a.icon).size(14).flex_none().text_color(t.foreground) : image(a.icon).size(14).flex_none();
-    return v_flex().id("maestro-launch").size_full().min_h(0).bg(t.popover ?? t.raised).p(5).text_size(12.8).text_color(t.foreground)
+    return v_flex().id("maestro-launch").w_full().h(launchHeight(items, { loading: this.agents.length === 0 })).min_h(0).bg(t.popover ?? t.raised).p(5).text_size(12.8).text_color(t.foreground)
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.modifiers.control || e.modifiers.platform || e.modifiers.alt) return;

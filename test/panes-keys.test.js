@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
 import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
-import { launchItems, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
+import { launchItems, launchHeight, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
 import * as reorder from "../mods/maestro/reorder.js";
 
 function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder } = {}) {
@@ -41,7 +41,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     shared: (key) => (store.has(key) ? store.get(key) : token),
     setShared: (key, value) => { store.set(key, value); },
     window: () => ({ platform: "macos" }),
-    launchItems, moveSelection, FOLDER, pickFolder,
+    launchItems, launchHeight, moveSelection, FOLDER, pickFolder,
     focused: () => focus,
     panes: () => paneList,
     spaces: () => spaceList,
