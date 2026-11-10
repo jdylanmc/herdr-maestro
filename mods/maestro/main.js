@@ -16,11 +16,11 @@ import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
 import { spaceFill, inkOn } from "./spacecolor.js";
 import { pastThreshold, canDrop, moveKey, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex } from "./reorder.js";
+import { PROJECTIONS, projectionOf, nestsUnder } from "./projection.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
 const keepMs = () => (shared("maestro.showFinished") ? 24 * 3600_000 : KEEP_FINISHED_MS);
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
-const PROJECTIONS = [{ id: "worktrees", label: "Worktrees" }, { id: "subagents", label: "Sub-agents" }, { id: "workspace", label: "Workspace" }];
 const STATUS_WORD = { working: "Working", blocked: "Waiting on you", done: "Done", idle: "Idle", failed: "Failed" };
 const NERD = "JetBrainsMono Nerd Font Mono";
 const MONO = "JetBrainsMono Nerd Font Mono";
@@ -500,7 +500,7 @@ export default class Maestro extends View {
     this.keyboardState();
     this.launchInFolderState();
     this.nav = [];
-    const proj = PROJECTIONS.some((p) => p.id === shared("maestro.projection")) ? shared("maestro.projection") : "worktrees";
+    const proj = projectionOf(shared("maestro.projection"));
     const hide = shared("maestro.hideFinished") ?? {};
     const every = new Map(list.map((x) => [x.a.address, x]));
     // Hiding finished agents in a space hides its idle or done workers (agents with a live parent); failures stay.
@@ -512,7 +512,7 @@ export default class Maestro extends View {
     const nested = new Set();
     for (const x of shown) {
       const p = byAddr.get(x.a.parent);
-      if (!p || p === x || proj === "workspace" || (proj === "worktrees" && wt(p) !== wt(x))) continue;
+      if (!p || p === x || !nestsUnder(proj, wt(p) === wt(x))) continue;
       if (!kidsOf.has(p.a.address)) kidsOf.set(p.a.address, []);
       kidsOf.get(p.a.address).push(x);
       nested.add(x.a.address);
@@ -594,7 +594,7 @@ export default class Maestro extends View {
       .when(!narrow, (el) => el.child(this.attentionStrip(t, list)));
   }
 
-  // Projection switch: Worktrees | Sub-agents | Workspace, shared across views.
+  // Projection switch: Worktrees | Agents, shared across views.
   segments(t, proj) {
     return h_flex().id("m-proj").mx(8).mb(4).p(2).h(24).flex_none().gap(2).rounded(7).bg(t.surface).border_1().border_color(t.border)
       .children(PROJECTIONS.map((p) => div().id(`proj-${p.id}`).flex_1().h_full().flex().items_center().justify_center().rounded(5)
