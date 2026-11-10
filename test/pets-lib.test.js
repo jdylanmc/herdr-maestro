@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { MOOD_ROWS, MOODS, moodRow, moodGif, parseChoices, setChoice, chosenPet, resolvePet, mergeChoices, petSource } from "../mods/maestro/petlib.js";
+import { MOOD_ROWS, MOODS, moodRow, moodGif, parseChoices, setChoice, chosenPet, resolvePet, mergeChoices, petSource, gridMove } from "../mods/maestro/petlib.js";
 
 const nine = { id: "nine", moods: false, rows: [0, 1, 2, 3, 4, 5, 6, 7, 8] };
 const atlas = { id: "atlas", moods: true, rows: [...new Set(Object.values(MOOD_ROWS).map(([a]) => a))] };
@@ -74,4 +74,18 @@ test("the pokedex mod's petlib.js is an exact copy", () => {
   const a = readFileSync(new URL("../mods/maestro/petlib.js", import.meta.url), "utf8");
   const b = readFileSync(new URL("../mods/maestro-pets/petlib.js", import.meta.url), "utf8");
   assert.equal(b, a, "run: cp mods/maestro/petlib.js mods/maestro-pets/petlib.js");
+});
+
+test("gridMove wraps left/right, keeps up/down in the grid and starts at the first cell", () => {
+  // 10 cells, 4 per row: rows [0-3] [4-7] [8-9]
+  assert.equal(gridMove(null, "down", 10, 4), 0);
+  assert.equal(gridMove(9, "right", 10, 4), 0);
+  assert.equal(gridMove(0, "left", 10, 4), 9);
+  assert.equal(gridMove(1, "up", 10, 4), 1);
+  assert.equal(gridMove(5, "up", 10, 4), 1);
+  assert.equal(gridMove(1, "down", 10, 4), 5);
+  assert.equal(gridMove(7, "down", 10, 4), 9);
+  assert.equal(gridMove(9, "down", 10, 4), 9);
+  assert.equal(gridMove(3, "enter", 10, 4), 3);
+  assert.equal(gridMove(0, "down", 0, 4), null);
 });

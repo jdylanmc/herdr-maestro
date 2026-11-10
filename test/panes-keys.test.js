@@ -10,12 +10,14 @@ import { isCopilot } from "../mods/maestro/agentlib.js";
 import { launchItems, launchHeight, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
 import * as reorder from "../mods/maestro/reorder.js";
 import * as projection from "../mods/maestro/projection.js";
+import * as petlib from "../mods/maestro/petlib.js";
 
-function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder } = {}) {
+function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList = [], focus = null, execImpl, pickFolder, extra = {} } = {}) {
   let token = initialToken;
   const tasks = [];
   const commands = [];
   const overlays = [];
+  const closed = [];
   const store = new Map();
   const elements = new Map();
   const element = () => {
@@ -53,13 +55,14 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ICON_KEY, PICKER, resolveIcon, isCopilot, ...reorder, ...projection,
     appHome: () => "/local-herdr",
     openOverlay: (spec) => { overlays.push(spec); },
-    closeOverlay() {},
+    closeOverlay(id) { closed.push(id); },
     layout: () => null,
     setAgentOrder() {},
     agents: () => [],
     theme: () => ({}),
     run: (command, args) => commands.push({ command, args: { ...args } }),
     localStorage: { getItem: () => null, setItem() {} },
+    ...extra,
   });
   const source = readFileSync(new URL(`../mods/${name}/main.js`, import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
@@ -77,7 +80,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
   mod.init(modProps, cx);
   tasks.length = 0;
   return {
-    mod, tasks, commands, overlays, elements, cx, store,
+    mod, tasks, commands, overlays, closed, elements, cx, store,
     setToken(value) { token = value; },
     click(id, hostingPane, modifiers = {}) {
       let stopped = false;
@@ -418,3 +421,107 @@ test("pet pane teardown does not close another pane", () => {
   mod.close();
   assert.deepEqual(commands, []);
 });
+
+const pets = [{ id: "maestro", name: "Maestro", rows: [0] }, { id: "koda", name: "Koda", rows: [0] }, { id: "eve", name: "Eve", rows: [0] }];
+
+test("an agent card's pet opens the pet picker for that agent without focusing or dragging the card", () => {
+  const board = loadMod("maestro", { extra: { ...petlib, image: () => ({ w: () => ({ h: () => ({ flex_none: () => ({}) }) }) }) } });
+  const x = { a: { address: "t7", space: "s1", status: "idle" }, tagKey: "sess-7", rec: { name: "worker" } };
+  board.mod.petButton({}, x, 22);
+  board.click("pet-t7", null);
+  assert.deepEqual(board.overlays.map((o) => [o.mod, o.kind, o.props.view, o.props.key, o.props.label]), [["maestro-pets", "popup", "pick", "sess-7", "worker"]]);
+  assert.deepEqual(board.commands, []);
+});
+
+test("the pet picker writes the agent's choice to the live cache and choices.json, and Default clears it", async () => {
+  let file = JSON.stringify({ default: null, sessions: { other: "eve" } });
+  const extra = {
+    ...petlib, image: () => null,
+    readTextFile: async () => file,
+    writeTextFile: async (_path, text) => { file = text; },
+    fs: { mkdir: async () => {} },
+  };
+  const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+  pick.mod.pets = pets;
+  const cells = pick.mod.pickCells();
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(plain(cells.map((c) => c?.id ?? null)), [null, "maestro", "koda", "eve"]);
+  assert.equal(pick.mod.pickChecked(cells), 0);
+  pick.mod.pickKey({ key: "right" }, pick.cx, cells);
+  pick.mod.pickKey({ key: "right" }, pick.cx, cells);
+  assert.equal(pick.mod.cursor, "koda");
+  pick.mod.pickKey({ key: "enter" }, pick.cx, cells);
+  await pick.tasks.pop()(pick.cx);
+  assert.deepEqual(plain(pick.store.get("maestro.pets")), { "sess-7": "koda" });
+  assert.deepEqual(JSON.parse(file).sessions, { other: "eve", "sess-7": "koda" });
+  assert.deepEqual(plain(pick.closed), ["ov"]);
+  assert.equal(pick.mod.pickChecked(cells), 2);
+  await pick.mod.pick(null);
+  assert.deepEqual(plain(pick.store.get("maestro.pets")), {});
+  assert.deepEqual(JSON.parse(file).sessions, { other: "eve" });
+});
+
+test("the pet picker stays open, shows why and restores the cache when choices.json cannot be saved", async () => {
+  const extra = {
+    ...petlib, image: () => null,
+    readTextFile: async () => JSON.stringify({ default: null, sessions: { "sess-7": "eve" } }),
+    writeTextFile: async () => { throw new Error("EACCES"); },
+    fs: { mkdir: async () => {} },
+  };
+  const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+  pick.store.set("maestro.pets", { "sess-7": "eve" });
+  pick.mod.pets = pets;
+  await pick.mod.pick(null, pick.cx);
+  assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "eve" });
+  assert.deepEqual(pick.closed.length, 0);
+  assert.equal(pick.mod.note, "Could not save choices.json");
+});
+
+test("Enter in the pet picker never clears the choice when a reload removes the pet under the cursor", async () => {
+  let file = JSON.stringify({ default: null, sessions: { "sess-7": "koda" } });
+  const extra = {
+    ...petlib, image: () => null,
+    readTextFile: async () => file,
+    writeTextFile: async (_path, text) => { file = text; },
+    fs: { mkdir: async () => {} },
+  };
+  const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+  pick.store.set("maestro.pets", { "sess-7": "koda" });
+  pick.mod.pets = pets;
+  pick.mod.pickKey({ key: "right" }, pick.cx, pick.mod.pickCells());
+  assert.equal(pick.mod.cursor, "eve");
+  pick.mod.pets = pets.filter((p) => p.id !== "eve");
+  pick.mod.pickKey({ key: "enter" }, pick.cx, pick.mod.pickCells());
+  await pick.tasks.pop()(pick.cx);
+  assert.deepEqual(JSON.parse(file).sessions, { "sess-7": "koda" });
+  assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "koda" });
+});
+
+for (const [what, setup] of [
+  ["the saved pet and the cursor's pet are removed by a reload", (pick) => {
+    pick.mod.pickKey({ key: "left" }, pick.cx, pick.mod.pickCells());
+    pick.mod.pickKey({ key: "right" }, pick.cx, pick.mod.pickCells());
+    assert.equal(pick.mod.cursor, "eve");
+    pick.mod.pets = pets.filter((p) => p.id !== "eve");
+  }],
+  ["the catalog has not loaded yet", (pick) => { pick.mod.pets = []; }],
+]) {
+  test(`Enter in the pet picker keeps a saved choice when ${what}`, async () => {
+    let writes = 0;
+    const extra = {
+      ...petlib, image: () => null,
+      readTextFile: async () => JSON.stringify({ default: null, sessions: { "sess-7": "eve" } }),
+      writeTextFile: async () => { writes++; },
+      fs: { mkdir: async () => {} },
+    };
+    const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+    pick.store.set("maestro.pets", { "sess-7": "eve" });
+    pick.mod.pets = pets;
+    setup(pick);
+    pick.mod.pickKey({ key: "enter" }, pick.cx, pick.mod.pickCells());
+    assert.equal(pick.tasks.length, 0);
+    assert.equal(writes, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "eve" });
+    assert.equal(pick.closed.length, 0);
+  });
+}

@@ -76,3 +76,15 @@ export function mergeChoices(cache, file, previous = null) {
   const changed = !p || p.default !== f.default;
   return { default: changed && f.default ? f.default : c.default, sessions };
 }
+
+// The cell an arrow key moves to in a picker grid of n cells, cols per row. Left and right wrap;
+// up and down stay in the grid (down from a short last row's column lands on its last cell).
+export function gridMove(at, key, n, cols) {
+  if (n <= 0) return null;
+  if (at == null || at < 0 || at >= n) return 0;
+  if (key === "right") return (at + 1) % n;
+  if (key === "left") return (at + n - 1) % n;
+  if (key === "up") return at >= cols ? at - cols : at;
+  if (key === "down") return Math.floor(at / cols) < Math.floor((n - 1) / cols) ? Math.min(at + cols, n - 1) : at;
+  return at;
+}

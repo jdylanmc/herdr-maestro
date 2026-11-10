@@ -130,6 +130,13 @@ Copilot CLI 1.0.107, 2026-11-06.
 **Shipped:** the terminal menu uses shipped `workspace-chrome` icons.
 **Closes with:** resolving mod assets through symlinked mod folders.
 
+### G-22 - Popups cannot scroll a keyboard cursor into view
+
+**Wanted:** arrow keys in the pet picker popup keep the selected pet on screen.
+**Evidence:** only `v_virtual_list` takes a scroll handle (`scroll_to_item`); a plain `overflow_y_scrollbar` div has none. In a `kind: "popup"` overlay, a `v_virtual_list` of grid rows (29 cells, 8 rows; with `size_full`, explicit `w`/`h`, with and without `track_scroll`) drew an empty area in `herdr-app shot` while the same rows in a plain div drew.
+**Shipped:** the picker grid is a plain scrolling div; the mouse wheel scrolls it, and the keyboard cursor can move past the visible rows.
+**Closes with:** a scroll handle for ordinary scroll containers, or virtual lists that render inside popups.
+
 ## Copilot CLI gaps
 
 ### G-07 - Waiting at the folder-trust prompt reports `idle`

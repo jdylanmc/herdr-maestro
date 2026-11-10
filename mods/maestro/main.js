@@ -1139,7 +1139,7 @@ export default class Maestro extends View {
             .child("✓"))))
         .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
       .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
-      .child(this.pet(x, 22));
+      .child(this.petButton(t, x, 22));
     return this.draggable(t, "agent", x.tagKey, h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).mt(1).mb(joined ? 0 : 1).pl(depth ? 8 : 0).flex_none().items_stretch()
       .on_hover((on, cx) => { if (on) this.hovered = a.address; else if (this.hovered === a.address) this.hovered = null; cx.notify(); })
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
@@ -1307,6 +1307,19 @@ export default class Maestro extends View {
     return image(`data/maestro/pets/${p.id}/${p.rows.includes(row) ? row : 0}.gif`).w(size).h(Math.round(size * 104 / 96)).flex_none();
   }
 
+  // An agent card's pet: a click or right-click opens the pet picker for that agent (the
+  // maestro-pets "pick" view) without focusing, dragging or previewing the card.
+  petButton(t, x, size, prefix = "pet") {
+    const pick = (_e, cx) => { cx.stop_propagation(); this.openPetPick(x); };
+    return div().id(`${prefix}-${x.a.address}`).flex_none().rounded(4).cursor_pointer().hover((st) => st.bg(t.hover))
+      .on_mouse_down("right", pick).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(pick)
+      .child(this.pet(x, size));
+  }
+
+  openPetPick(x) {
+    openOverlay({ mod: "maestro-pets", kind: "popup", at: "pointer", width: 330, height: 392, props: { view: "pick", key: x.tagKey, label: this.title(x) } });
+  }
+
   tagChips(t, tags) {
     return h_flex().flex_none().gap(4).children(tags.slice(0, 3).map(({ g, mine }) => {
       const c = this.tagColor(t, g);
@@ -1407,8 +1420,9 @@ export default class Maestro extends View {
     return v_flex().id("maestro-footer").size_full().min_h(0).overflow_y_scrollbar().px(10).pt(6).pb(6).gap(4).bg(t.chrome)
       .child(h_flex().gap(10).items_center()
         .child(div().id("pet-box").size(48).flex_none().rounded(8).border_1().border_color(t.border).bg(t.surface).flex().items_center().justify_center()
-          .tooltip(`${this.petOf(x)?.name ?? "No pet"} · ${this.petMood(x)} — click to open the pet pokedex`)
-          .on_click(() => this.openPets())
+          .tooltip(`${this.petOf(x)?.name ?? "No pet"} · ${this.petMood(x)} — click to choose this session's pet`)
+          .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.openPetPick(x); })
+          .on_click(() => this.openPetPick(x))
           .child(this.pet(x, 40)))
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().truncate().text_size(14).font_semibold().child(this.title(x)))
@@ -1516,7 +1530,7 @@ export default class Maestro extends View {
       .hover((st) => st.bg(t.hover))
       .on_click(() => this.focus(x))
       .child(h_flex().gap(6).items_center()
-        .child(this.pet(x, 13))
+        .child(this.petButton(t, x, 13, "bpet"))
         .child(div().flex_1().min_w(0).truncate().text_size(12).child(snap?.session_name || (a.title ?? "").replace(/ - GitHub Copilot$/, "") || a.address)))
       .child(div().truncate().text_size(11).text_color(t.dim).child([x.machine, x.key, snap?.context_window && `ctx ${snap.context_window.used_percentage}%`, snap?.ai_used && `${snap.ai_used.formatted} AIC`].filter(Boolean).join(" · ")))
       .when(Boolean(why) || running > 0, (el) => el.child(h_flex().gap(6).text_size(11)
