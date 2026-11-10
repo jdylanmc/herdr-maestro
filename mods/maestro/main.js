@@ -949,20 +949,33 @@ export default class Maestro extends View {
     const started = byStart(this.startSeen ?? { at: new Map(), next: 0 }, (k) => k.a.address);
     const kids = this.arrangeAgents(`kids:${x.a.address}`, (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || started(p, q)));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
-    rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 1, bottom: 1 }));
+    rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth, tasks.length > 0), { left: 14 + depth * 14, right: 2, top: 1, bottom: tasks.length ? 0 : 1 }));
     if (tasks.length) {
       const tid = `tasks:${x.a.address}`;
       const open = !this.folded.has(tid);
-      rows.push(h_flex().id(tid).ml(14 + depth * 14).pl(26).py(1).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
+      const inset = depth ? 9 : 0;
+      const sub = [h_flex().id(tid).pl(26 - inset).py(1).gap(6).items_center().text_size(12).text_color(t.dim).hover((st) => st.text_color(t.foreground))
         .on_click((_e, cx) => this.fold(tid, cx))
         .child(div().w(10).text_size(10).child(open ? "⌄" : "›"))
         .child(shared("maestro.showFinished") ? `${tasks.length} subagent${tasks.length > 1 ? "s" : ""}` : `${tasks.length} running subagent${tasks.length > 1 ? "s" : ""}`)
         .when(Boolean(shared("maestro.showFinished")), (el) => el.children(["running", "idle", "failed"].map((st) => [st, tasks.filter((r) => r.status === st).length]).filter(([, n]) => n)
           .map(([st, n]) => div().text_color(st === "running" ? t.working : st === "failed" ? t.blocked : t.dim).child(`· ${n} ${st}`))))
-        .when(!open, (el) => el.child(h_flex().gap(4).children(tasks.slice(0, 8).map((r) => this.taskGlyph(t, r))))));
-      if (open) tasks.forEach((r, i) => rows.push(this.taskRow(t, x, r, now, depth, i === tasks.length - 1)));
+        .when(!open, (el) => el.child(h_flex().gap(4).children(tasks.slice(0, 8).map((r) => this.taskGlyph(t, r)))))];
+      if (open) tasks.forEach((r, i) => sub.push(this.taskRow(t, x, r, now, depth, i === tasks.length - 1, inset)));
+      rows.push(this.subagentBlock(t, x, depth, inset, sub));
     }
     for (const k of kids) this.pushAgent(t, rows, order, k, kidsOf, now, depth + 1);
+  }
+
+  // An agent's subagent rows share its card's focus/hover highlight: one block under the card body.
+  subagentBlock(t, x, depth, inset, rows) {
+    const a = x.a;
+    const d = this.drag?.moved && this.drag.kind === "agent" ? this.drag : null;
+    return v_flex().id(`subs-${a.address}`).ml(14 + depth * 14 + inset).mr(2).pt(1).flex_none().relative().rounded_b(6)
+      .when(a.focused, (el) => el.bg(t.selected).child(div().absolute().left(0).top(0).bottom(4).w(3).rounded_b(2).bg(t.working)))
+      .when(!a.focused && this.hovered === a.address, (el) => el.bg(t.hover))
+      .when(Boolean(d && d.id === x.tagKey && d.over !== x.tagKey), (el) => el.opacity(0.5))
+      .children(rows);
   }
 
   // ---- Drag to reorder: spaces (Herdr's own order, per machine), worktree groups and sibling agents (Maestro-only) ----
@@ -1094,7 +1107,7 @@ export default class Maestro extends View {
     return div().size(size - 4).mx(2).flex_none().rounded(size).border(1.5).border_color(t.idle ?? t.dim);
   }
 
-  agentCard(t, x, now, depth) {
+  agentCard(t, x, now, depth, joined = false) {
     const { a, s } = x;
     const failedKids = s ? [...s.agents.values()].filter((g) => g.status === "failed" && now - (g.ended ?? 0) < keepMs()).length : 0;
     const raw = x.kind ?? (s ? attention(s) : null) ?? (failedKids ? `${failedKids} failed` : null);
@@ -1106,10 +1119,11 @@ export default class Maestro extends View {
     const asks = why && a.status === "blocked";
     const line = asks ? why : why ? `${why} · ${this.task(x)}` : this.task(x);
     const body = h_flex().id(`cardb-${a.address}`).w_full().min_w(0).relative().pl(8).pr(6).py(4).gap(8).items_center().rounded(6).opacity(finished ? 0.6 : 1)
+      .when(joined, (el) => el.rounded_b(0))
       .when(a.focused, (el) => el.bg(t.selected)).hover((st) => st.bg(a.focused ? t.selected : t.hover))
       .on_click(() => { if (!this.dragged) this.focus(x); })
       .on_hover((on, cx) => { if (on) this.readScreen(a.address); this.hoverCard(a.address, on, cx); })
-      .when(a.focused, (el) => el.child(div().absolute().left(0).top(4).bottom(4).w(3).rounded(2).bg(t.working)))
+      .when(a.focused, (el) => el.child(div().absolute().left(0).top(4).bottom(joined ? 0 : 4).w(3).rounded(2).when(joined, (b) => b.rounded_b(0)).bg(t.working)))
       .child(this.pickableIcon(t, x, 20))
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(h_flex().gap(6).items_center()
@@ -1126,7 +1140,7 @@ export default class Maestro extends View {
         .when(Boolean(this.blockedLine(x)), (el) => el.child(this.promptRow(t, this.blockedLine(x), 11))))
       .when(this.hovered === a.address, (el) => el.child(this.cardActions(t, x)))
       .child(this.pet(x, 22));
-    return this.draggable(t, "agent", x.tagKey, h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).my(1).pl(depth ? 8 : 0).flex_none().items_stretch()
+    return this.draggable(t, "agent", x.tagKey, h_flex().id(`card-${a.address}`).ml(14 + depth * 14).mr(2).mt(1).mb(joined ? 0 : 1).pl(depth ? 8 : 0).flex_none().items_stretch()
       .on_hover((on, cx) => { if (on) this.hovered = a.address; else if (this.hovered === a.address) this.hovered = null; cx.notify(); })
       .when(depth > 0, (el) => el.border_l(1).border_color(t.border))
       .child(div().flex_1().min_w(0)
@@ -1240,13 +1254,13 @@ export default class Maestro extends View {
     return div().text_size(12).text_color(t.muted).child("✓");
   }
 
-  taskRow(t, x, r, now, depth, last) {
+  taskRow(t, x, r, now, depth, last, inset = 0) {
     const live = r.status === "running";
     const sub = [r.activity && live ? r.activity : null, r.description].filter(Boolean).join(" · ");
     const age = r.status === "idle" ? `idle ${ago(now - (r.lastAt ?? r.ended ?? now))}` : ago((r.status === "running" ? now : r.ended ?? now) - r.started);
     const stats = [r.tools ? `${r.tools} tools` : null, age].filter(Boolean).join(" · ");
     const tip = [r.name, r.description, r.status === "idle" ? "Idle: can still be messaged" : null, r.kind && r.kind !== r.name ? r.kind : null, [r.model, r.effort].filter(Boolean).join(" · "), r.mode, r.turns > 1 ? `${r.turns} turns` : null, r.tokens ? `${compact(r.tokens)} tokens` : null, stats].filter(Boolean).join("\n");
-    return h_flex().id(`a-${x.a.address}-${r.id}`).ml(14 + depth * 14).pl(30 + r.depth * 14).pr(8).h(sub ? 34 : 22).flex_none().gap(0).items_center().text_size(12.5)
+    return h_flex().id(`a-${x.a.address}-${r.id}`).pl(30 + r.depth * 14 - inset).pr(6).h(sub ? 34 : 22).flex_none().gap(0).items_center().text_size(12.5)
       .tooltip(tip)
       .child(div().self_start().w(10).h(last ? 11 : sub ? 34 : 22).mr(6).flex_none().border_l(1).border_color(t.border)
         .child(div().mt(10).w(8).border_b(1).border_color(t.border)))
