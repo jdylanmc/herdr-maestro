@@ -440,7 +440,6 @@ test("the pet picker writes the agent's choice to the live cache and choices.jso
     readTextFile: async () => file,
     writeTextFile: async (_path, text) => { file = text; },
     fs: { mkdir: async () => {} },
-    VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) },
   };
   const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
   pick.mod.pets = pets;
@@ -460,4 +459,20 @@ test("the pet picker writes the agent's choice to the live cache and choices.jso
   await pick.mod.pick(null);
   assert.deepEqual(plain(pick.store.get("maestro.pets")), {});
   assert.deepEqual(JSON.parse(file).sessions, { other: "eve" });
+});
+
+test("the pet picker stays open, shows why and restores the cache when choices.json cannot be saved", async () => {
+  const extra = {
+    ...petlib, image: () => null,
+    readTextFile: async () => JSON.stringify({ default: null, sessions: { "sess-7": "eve" } }),
+    writeTextFile: async () => { throw new Error("EACCES"); },
+    fs: { mkdir: async () => {} },
+  };
+  const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+  pick.store.set("maestro.pets", { "sess-7": "eve" });
+  pick.mod.pets = pets;
+  await pick.mod.pick(null, pick.cx);
+  assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "eve" });
+  assert.deepEqual(pick.closed.length, 0);
+  assert.equal(pick.mod.note, "Could not save choices.json");
 });

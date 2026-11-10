@@ -100,19 +100,27 @@ export default class MaestroPets extends View {
   }
 
   // Live cache first for instant feedback, then choices.json (atomic, retried when stale).
+  // False when the file could not be saved; the cache then gets its old entry back.
   async choose(key, id) {
-    if (key == null) setShared("maestro.pet", id);
-    else { const s = { ...(shared("maestro.pets") ?? {}) }; if (id == null) delete s[key]; else s[key] = id; setShared("maestro.pets", s); }
+    const old = key == null ? shared("maestro.pet") : (shared("maestro.pets") ?? {})[key];
+    const cache = (v) => {
+      if (key == null) setShared("maestro.pet", v ?? null);
+      else { const s = { ...(shared("maestro.pets") ?? {}) }; if (v == null) delete s[key]; else s[key] = v; setShared("maestro.pets", s); }
+    };
+    cache(id);
     for (let i = 0; i < 3; i++) {
       let before = null;
       try { before = await readTextFile(choicesPath()); } catch {}
       try {
         await fs.mkdir(petDir(), { recursive: true });
         await writeTextFile(choicesPath(), JSON.stringify(setChoice(parseChoices(before), key, id), null, 1), before);
-        return;
+        this.note = null;
+        return true;
       } catch {}
     }
+    cache(old);
     this.note = "Could not save choices.json";
+    return false;
   }
 
   async rescan(force) {
@@ -239,11 +247,12 @@ export default class MaestroPets extends View {
     return i < 0 ? 0 : i;
   }
 
-  async pick(pet) {
+  // Closes only once choices.json has it; a failed save stays open and shows why.
+  async pick(pet, cx) {
     const p = props() ?? {};
     if (p.key == null) return;
-    await this.choose(p.key, pet?.id ?? null);
-    closeOverlay(p.overlay);
+    if (await this.choose(p.key, pet?.id ?? null)) closeOverlay(p.overlay);
+    else cx?.notify();
   }
 
   openPokedex() {
@@ -255,7 +264,7 @@ export default class MaestroPets extends View {
   pickKey(e, cx, cells) {
     const n = cells.length;
     if (e.key === "escape") closeOverlay(props()?.overlay);
-    else if (e.key === "enter") { const c = cells[this.at ?? this.pickChecked(cells)]; if (n) cx.spawn(async () => { await this.pick(c); }); }
+    else if (e.key === "enter") { const c = cells[this.at ?? this.pickChecked(cells)]; if (n) cx.spawn(async (cx) => { await this.pick(c, cx); }); }
     else if (["left", "right", "up", "down"].includes(e.key)) {
       this.at = gridMove(this.at ?? this.pickChecked(cells), e.key, n, PICK.cols);
     } else return;
@@ -270,7 +279,7 @@ export default class MaestroPets extends View {
       .border_1().border_color(cursor ? t.foreground : on ? t.accent : t.border).bg(on ? t.selected : t.surface)
       .hover((s) => s.bg(t.hover)).tooltip(pet ? pet.name ?? pet.id : `Default${def ? ` (${def.name ?? def.id})` : ""}: Maestro's pet for sessions without their own`)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => cx.spawn(async () => { await this.pick(pet); }))
+      .on_click((_e, cx) => cx.spawn(async (cx) => { await this.pick(pet, cx); }))
       .child(shown ? image(moodGif(shown, "idle")).w(52).h(56).flex_none().when(!pet, (el) => el.opacity(0.55))
         : div().size(52).flex_none())
       .child(div().w_full().text_center().truncate().text_size(11).text_color(pet ? t.foreground : t.muted).child(pet ? pet.name ?? pet.id : "Default"))
@@ -294,7 +303,7 @@ export default class MaestroPets extends View {
             .children(cells.slice(r * PICK.cols, r * PICK.cols + PICK.cols).map((c, j) => this.pickCell(t, c, r * PICK.cols + j, checked, def))))
           : [div().p(12).text_color(t.dim).child(this.progress?.state === "rendering" ? "Rendering pets…" : "No pets yet")]))
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child("Arrows · Enter · Esc"))
+        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(this.note ? t.blocked : t.dim).child(this.note ?? "Arrows · Enter · Esc"))
         .child(button("pick-pokedex", "Open pokedex…", () => this.openPokedex()))
         .child(button("pick-close", "Close", () => closeOverlay(p.overlay))));
   }
