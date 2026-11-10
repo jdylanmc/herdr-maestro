@@ -15,6 +15,7 @@ import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, 
 import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
 import { spaceFill, inkOn } from "./spacecolor.js";
+import { ICON_KEY, PICKER, resolveIcon } from "./agenticon.js";
 import { pastThreshold, canDrop, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex, startOrder, byStart, dropKeys } from "./reorder.js";
 import { PROJECTIONS, projectionOf, nestsUnder } from "./projection.js";
 
@@ -24,12 +25,6 @@ const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 const STATUS_WORD = { working: "Working", blocked: "Waiting on you", done: "Done", idle: "Idle", failed: "Failed" };
 const NERD = "JetBrainsMono Nerd Font Mono";
 const MONO = "JetBrainsMono Nerd Font Mono";
-// Session icons: Nerd Font glyphs an agent picks with `maestro icon <name>`; others get one by name.
-const ICONS = {
-  robot: "\u{F06A9}", code: "\u{F121}", bug: "\u{F188}", eye: "\u{F06E}", shield: "\u{F132}", compass: "\u{F14E}",
-  brush: "\u{F1FC}", flask: "\u{F0C3}", rocket: "\u{F135}", cogs: "\u{F085}", search: "\u{F002}", book: "\u{F02D}",
-  terminal: "\u{F120}", wrench: "\u{F0AD}", lightbulb: "\u{F0EB}", heart: "\u{F004}", star: "\u{F005}", bolt: "\u{F0E7}",
-};
 // Identity colors come from the active Herdr theme, so icons and tags follow theme changes.
 const palette = (t) => [t.ansi6, t.ansi3, t.ansi4, t.ansi5, t.ansi2, t.ansi1].filter(Boolean);
 const themed = (t, c) => (c && !c.startsWith("#") ? t[c] : c);
@@ -1062,16 +1057,29 @@ export default class Maestro extends View {
     return name && name !== this.title(x) ? name : x.a.tab_name ?? "";
   }
 
-  // The session's icon: an agent-chosen Nerd Font glyph and color, else one picked from its name.
+  // The session's icon (agenticon.js): the human's pick, else the agent's own Nerd Font glyph and color,
+  // else (other agents) its program's icon as Herdr's agent lists show it, else one picked from its key.
   icon(t, x, size = 18) {
-    const key = x.rec.icon ?? null;
-    // Other agents without a Maestro icon show their program's icon, as Herdr's agent lists do.
-    const p = !key && otherAgent(x.a) ? x.a.program : null;
-    if (p?.icon) return div().w(size + 4).flex_none().flex().items_center().justify_center()
-      .child(p.tint ? svg(p.icon).size(size).text_color(t.foreground) : image(p.icon).w(size).h(size));
-    const glyph = key ? (ICONS[key] ?? key) : Object.values(ICONS)[hash(x.tagKey) % Object.keys(ICONS).length];
-    const color = themed(t, x.rec.color) ?? palette(t)[hash(x.tagKey + "c") % palette(t).length];
-    return div().w(size + 4).flex_none().text_center().font_family(NERD).text_size(size).text_color(color).child(glyph);
+    const r = resolveIcon({ human: (shared(ICON_KEY) ?? {})[x.tagKey], agent: x.rec, program: otherAgent(x.a) ? x.a.program : null, key: x.tagKey });
+    const color = themed(t, r.color) ?? palette(t)[hash(x.tagKey + "c") % palette(t).length];
+    if (r.program) return div().w(size + 4).flex_none().flex().items_center().justify_center()
+      .child(r.program.tint ? svg(r.program.icon).size(size).text_color(r.color ? color : t.foreground) : image(r.program.icon).w(size).h(size));
+    return div().w(size + 4).flex_none().text_center().font_family(NERD).text_size(size).text_color(color).child(r.glyph);
+  }
+
+  // A card's icon opens its icon picker (click or right-click); the press stops here, so it neither
+  // focuses the agent nor starts a drag.
+  pickableIcon(t, x, size) {
+    const pick = (_e, cx) => { cx.stop_propagation(); this.openIcon(x); };
+    return div().id(`icon-${x.a.address}`).flex_none().rounded(4).cursor_pointer().hover((st) => st.bg(t.hover)).tooltip("Change icon")
+      .on_mouse_down("right", pick).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(pick)
+      .child(this.icon(t, x, size));
+  }
+
+  openIcon(x) {
+    const p = otherAgent(x.a) && x.a.program?.icon ? { icon: x.a.program.icon, tint: Boolean(x.a.program.tint) } : null;
+    openOverlay({ mod: "maestro-icon", kind: "popup", at: "pointer", width: PICKER.width, height: PICKER.height,
+      props: { key: x.tagKey, label: this.title(x), terminal: x.a.address, agent: { icon: x.rec.icon ?? null, color: x.rec.color ?? null }, program: p } });
   }
 
   statusDot(t, st) { return div().size(7).flex_none().rounded(4).bg(t[st] ?? t.idle); }
@@ -1102,7 +1110,7 @@ export default class Maestro extends View {
       .on_click(() => { if (!this.dragged) this.focus(x); })
       .on_hover((on, cx) => { if (on) this.readScreen(a.address); this.hoverCard(a.address, on, cx); })
       .when(a.focused, (el) => el.child(div().absolute().left(0).top(4).bottom(4).w(3).rounded(2).bg(t.working)))
-      .child(this.icon(t, x, 20))
+      .child(this.pickableIcon(t, x, 20))
       .child(v_flex().flex_1().min_w(0).gap(1)
         .child(h_flex().gap(6).items_center()
           .child(div().flex_1().min_w(0).truncate().text_size(13).font_semibold().child(this.title(x)))
@@ -1407,6 +1415,9 @@ export default class Maestro extends View {
         .child(div().id("edit-tags").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
           .on_click(() => openOverlay({ kind: "dialog", mod: "maestro-tags", props: { key: x.tagKey, label: snap?.session_name ?? a.address, terminal: a.address } }))
           .child("Edit tags…"))
+        .child(h_flex().id("edit-icon").gap(2).items_center().px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
+          .tooltip("Change this agent's icon").on_click(() => this.openIcon(x))
+          .child(this.icon(t, x, 11)).child("Icon…"))
         .child(div().flex_1())
         .child(div().id("mood-preview").px(6).rounded(4).text_size(11).text_color(t.dim).hover((st) => st.bg(t.hover).text_color(t.foreground))
           .tooltip("Cosmetic: cycle the pet's moods")

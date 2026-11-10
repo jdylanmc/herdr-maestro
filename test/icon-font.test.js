@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 test("the mod ships its named icon font with every private-use glyph it renders", () => {
-  const source = readFileSync(new URL("../mods/maestro/main.js", import.meta.url), "utf8");
+  const source = ["main.js", "agenticon.js"].map((f) => readFileSync(new URL(`../mods/maestro/${f}`, import.meta.url), "utf8")).join("\n");
   const family = /const NERD = "([^"]+)"/.exec(source)[1];
   const glyphs = [...source.matchAll(/\\u(?:\{([0-9a-f]+)\}|([0-9a-f]{4}))/gi)]
     .map((match) => parseInt(match[1] ?? match[2], 16))

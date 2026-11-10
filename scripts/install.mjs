@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { missingMods } from "./lib/layout-mods.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const mods = ["maestro", "maestro-tags", "maestro-pets", "maestro-launch", "maestro-menu", "maestro-color"];
+const mods = ["maestro", "maestro-tags", "maestro-pets", "maestro-launch", "maestro-menu", "maestro-color", "maestro-icon"];
 const windows = process.platform === "win32";
 const quote = (path) => `"${path}"`;
 const backup = (path) => renameSync(path, `${path}.backup.${Date.now()}`);
