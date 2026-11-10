@@ -586,7 +586,7 @@ export default class Maestro extends View {
         .child(icon("m-theme", "mods/maestro/palette.svg", "Theme", () => this.openThemes()))
         .child(icon("m-board", "layers", "Board (cmd-shift-b)", () => this.openBoard()))))
       .when(!narrow, (el) => el.child(this.segments(t, proj)))
-      .child(v_flex().id("maestro-list").flex_1().min_h(0).px(narrow ? 0 : 4).pb(6).overflow_y_scrollbar().mode("always")
+      .child(v_flex().id("maestro-list").flex_1().min_h(0).pl(narrow ? 0 : 4).pr(narrow ? 0 : 14).pb(6).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { if (this.drag) { this.endDrag(); cx.notify(); } })
         .on_hover((on, cx) => { if (!on && this.drag) { this.endDrag(); cx.notify(); } })
         .when(spaces().length === 0, (el) => el.child(div().p(12).text_color(t.dim).child("No spaces yet.")))
@@ -681,7 +681,7 @@ export default class Maestro extends View {
     const waiting = list.filter((x) => x.a.status === "blocked").map((x) => ({ x, why: x.kind ?? (x.s ? attention(x.s) : null) }));
     if (!waiting.length) return div();
     const title = waiting.every((w) => w.why === "question") ? "Quick question" : "Waiting on you";
-    return v_flex().id("m-attn").flex_none().max_h(180).overflow_y_scrollbar().px(6).pt(4).pb(4).gap(1).border_t(1).border_color(t.border)
+    return v_flex().id("m-attn").flex_none().max_h(180).overflow_y_scrollbar().pl(6).pr(14).pt(4).pb(4).gap(1).border_t(1).border_color(t.border)
       .child(h_flex().px(4).pb(2).gap(6).items_center()
         .child(div().size(7).rounded(4).bg(t.blocked))
         .child(div().text_size(12).font_semibold().text_color(t.blocked).child(title))
@@ -1469,7 +1469,7 @@ export default class Maestro extends View {
           .on_mouse_down("left", (_e, cx) => { if (props()?.place !== "pane") cx.stop_propagation(); })
           .on_click(() => this.dismissBoard()).child("×")))
       .child(h_flex().id("board-cols").flex_1().min_h(0).p(8).gap(8).items_start().children(cols.map((c) =>
-        v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(6).gap(6).rounded(8).bg(t.chrome).overflow_y_scrollbar()
+        v_flex().id(`col-${c.id}`).flex_1().min_w(0).h_full().p(6).pr(14).gap(6).rounded(8).bg(t.chrome).overflow_y_scrollbar()
           .child(h_flex().gap(6).items_center().px(2)
             .child(div().size(8).rounded(4).bg(c.id === "failed" ? t.blocked : t[c.id] ?? t.idle))
             .child(div().text_size(12).text_color(t.muted).child(c.label))
@@ -1618,7 +1618,7 @@ export default class Maestro extends View {
         cx.notify();
       })
       .child(div().px(8).pb(4).text_size(11).text_color(t.muted).whitespace_normal().child("Sets this layout's theme for that appearance (dark or light)."))
-      .child(v_flex().id("themes-list").flex_1().min_h(0).overflow_y_scrollbar().gap(1)
+      .child(v_flex().id("themes-list").flex_1().min_h(0).pr(10).overflow_y_scrollbar().gap(1)
         .when(dark.length > 0, (el) => el.child(head("Dark")))
         .children(dark.map((th, i) => row(th, i)))
         .when(list.length > dark.length, (el) => el.child(head("Light")))
