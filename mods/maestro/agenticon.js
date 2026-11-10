@@ -65,6 +65,26 @@ export function withIcon(icons, key, value) {
   return next;
 }
 
+// The picker's keyboard items: the presets in rows of 6, then the theme's colors in rows of 7. Each item's
+// `at` is its index in the flat list, the one keyboard focus (pickerStep) and the rendered rings share.
+export const ICON_COLS = 6;
+export const COLOR_COLS = 7;
+export function pickerItems(colors) {
+  const items = [...Object.keys(ICONS).map((icon) => ({ icon })), ...colors.map((color) => ({ color }))].map((it, at) => ({ ...it, at }));
+  const rows = (list, n) => Array.from({ length: Math.ceil(list.length / n) }, (_, k) => list.slice(k * n, (k + 1) * n));
+  return { items, icons: rows(items.filter((it) => it.icon), ICON_COLS), colors: rows(items.filter((it) => it.color), COLOR_COLS) };
+}
+
+// Focus after an arrow key: left/right step (wrapping), up/down move a row of icons or of colors.
+export function pickerStep(at, key, n, isColor) {
+  const row = isColor ? COLOR_COLS : ICON_COLS;
+  if (key === "right") return at == null ? 0 : (at + 1) % n;
+  if (key === "left") return at == null ? n - 1 : (at + n - 1) % n;
+  if (key === "down") return at == null ? 0 : Math.min(n - 1, at + row);
+  if (key === "up") return at == null ? n - 1 : Math.max(0, at - row);
+  return at;
+}
+
 // The popup's size. Herdr sizes a popup to its content (`height` is only the most it grows to), so the
 // picker sets its own height from this too.
 export const PICKER = { width: 300, height: 384 };

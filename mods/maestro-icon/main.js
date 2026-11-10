@@ -5,11 +5,9 @@
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { props, closeOverlay, theme, shared, setShared } from "herdr";
-import { ICON_KEY, ICONS, COLORS, PICKER, hash, parseGlyph, parseColor, cleanChoice, resolveIcon, withIcon } from "./agenticon.js";
+import { ICON_KEY, ICONS, COLORS, PICKER, hash, parseGlyph, parseColor, cleanChoice, resolveIcon, withIcon, pickerItems, pickerStep } from "./agenticon.js";
 
 const NERD = "JetBrainsMono Nerd Font Mono";
-const COLS = 6;
-const SWATCHES = 7;
 const PRESETS = Object.keys(ICONS);
 const palette = (t) => [t.ansi6, t.ansi3, t.ansi4, t.ansi5, t.ansi2, t.ansi1].filter(Boolean);
 const SOURCE = { human: "Your pick", agent: "The agent's pick", program: "Its program's icon", auto: "Picked from its name" };
@@ -64,14 +62,9 @@ export default class MaestroIcon extends View {
 
   // Icons, then colors: left/right step, up/down move a row of icons (or colors).
   key(e, cx, items) {
-    const n = items.length;
-    const row = this.at != null && items[this.at]?.color ? SWATCHES : COLS;
     if (e.key === "escape") closeOverlay(props()?.overlay);
     else if (this.typing) return;
-    else if (e.key === "right") this.at = this.at == null ? 0 : (this.at + 1) % n;
-    else if (e.key === "left") this.at = this.at == null ? n - 1 : (this.at + n - 1) % n;
-    else if (e.key === "down") this.at = this.at == null ? 0 : Math.min(n - 1, this.at + row);
-    else if (e.key === "up") this.at = this.at == null ? n - 1 : Math.max(0, this.at - row);
+    else if (["right", "left", "down", "up"].includes(e.key)) this.at = pickerStep(this.at, e.key, items.length, Boolean(items[this.at]?.color));
     else if (e.key === "enter" && this.at != null && items[this.at]) this.set(items[this.at].icon ? { icon: items[this.at].icon } : { color: items[this.at].color });
     else return;
     cx.stop_propagation();
@@ -85,21 +78,21 @@ export default class MaestroIcon extends View {
     const r = resolveIcon({ human: this.choice, agent: p.agent, program: p.program, key: p.key });
     const ink = colorOf(r.color);
     const colors = COLORS.filter((c) => t[c]);
-    const items = [...PRESETS.map((icon) => ({ icon })), ...colors.map((color) => ({ color }))];
+    const grid = pickerItems(colors);
+    const items = grid.items;
     const draw = (size) => (r.program
       ? (r.program.tint ? svg(r.program.icon).size(size).text_color(r.color ? ink : t.foreground) : image(r.program.icon).w(size).h(size))
       : div().font_family(NERD).text_size(size).text_color(ink).child(r.glyph));
     const label = (text) => div().h(14).text_size(11).text_color(t.dim).child(text);
     const ring = (on, at) => (on || this.at === at ? t.foreground : t.border);
-    const cell = (name, i) => h_flex().id(`ic-${name}`).size(30).flex_none().rounded(6).items_center().justify_center().cursor_pointer()
+    const cell = ({ icon: name, at: i }) => h_flex().id(`ic-${name}`).size(30).flex_none().rounded(6).items_center().justify_center().cursor_pointer()
       .bg(t.raised).border_1().border_color(ring(this.choice.icon === name, i)).tooltip(name)
       .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { this.set({ icon: name }); cx.notify(); })
       .child(div().font_family(NERD).text_size(16).text_color(ink).child(ICONS[name]));
-    const swatch = (name, i) => h_flex().id(`icc-${name}`).size(20).flex_none().rounded(10).bg(t[name]).cursor_pointer()
-      .border_2().border_color(ring(this.choice.color === name, PRESETS.length + i)).tooltip(name)
+    const swatch = ({ color: name, at: i }) => h_flex().id(`icc-${name}`).size(20).flex_none().rounded(10).bg(t[name]).cursor_pointer()
+      .border_2().border_color(ring(this.choice.color === name, i)).tooltip(name)
       .hover((s) => s.opacity(0.85)).on_click((_e, cx) => { this.set({ color: name }); cx.notify(); });
-    const rows = (list, size, fn, offset = 0) => Array.from({ length: Math.ceil(list.length / size) }, (_, k) =>
-      h_flex().gap(5).children(list.slice(k * size, (k + 1) * size).map((x, j) => fn(x, offset + k * size + j))));
+    const rows = (list, fn) => list.map((row) => h_flex().gap(5).children(row.map(fn)));
     const button = (id, text, action) => div().id(id).px(10).h(28).flex().items_center().rounded(6).cursor_pointer().flex_none()
       .bg(t.raised).text_color(t.foreground).text_size(12).hover((s) => s.bg(t.hover)).on_click(action).child(text);
     const input = (state, bad) => Input.new(state).flex_1().h(28).px(8).rounded(6).border_1().border_color(bad ? t.blocked : t.border)
@@ -115,12 +108,12 @@ export default class MaestroIcon extends View {
           .child(div().truncate().font_semibold().child(`Icon for ${p.label ?? "agent"}`))
           .child(div().truncate().text_size(11).text_color(t.dim).child(SOURCE[r.source]))))
       .child(label("Icon"))
-      .child(v_flex().gap(5).children(rows(PRESETS, COLS, cell)))
+      .child(v_flex().gap(5).children(rows(grid.icons, cell)))
       .child(h_flex().gap(6).items_center()
         .child(input(this.glyph, this.error === "glyph").font_family(NERD))
         .child(button("ic-glyph", "Use", (_e, cx) => this.customGlyph(cx))))
       .child(label("Color"))
-      .child(v_flex().gap(5).children(rows(colors, SWATCHES, swatch, PRESETS.length)))
+      .child(v_flex().gap(5).children(rows(grid.colors, swatch)))
       .child(h_flex().gap(6).items_center()
         .child(div().size(20).flex_none().rounded(10).bg(parseColor(this.hex.value()) ? colorOf(parseColor(this.hex.value())) : ink).border_1().border_color(t.border))
         .child(input(this.hex, this.error === "color"))

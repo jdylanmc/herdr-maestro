@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ICONS, parseGlyph, parseColor, cleanChoice, resolveIcon, withIcon } from "../mods/maestro/agenticon.js";
+import { ICONS, parseGlyph, parseColor, cleanChoice, resolveIcon, withIcon, pickerItems, pickerStep } from "../mods/maestro/agenticon.js";
 
 test("an icon is a preset or one glyph", () => {
   assert.equal(parseGlyph("rocket"), "rocket");
@@ -52,6 +52,23 @@ test("setting and resetting one agent's icon leaves the others alone", () => {
   assert.deepEqual(withIcon(icons, "a", { icon: null, color: null }), { b: icons.b });
   assert.deepEqual(withIcon(undefined, "c", { icon: "eye" }), { c: { icon: "eye", color: null } });
   assert.deepEqual(icons.a, { icon: "bug", color: null });
+});
+
+test("arrowing from the last preset focuses the first, then second, color: the swatch Enter applies", () => {
+  const { items, icons, colors } = pickerItems(["ansi1", "ansi2", "ansi3"]);
+  const n = Object.keys(ICONS).length;
+  const ring = (at) => [...icons.flat(), ...colors.flat()].filter((it) => it.at === at);
+  let at = pickerStep(n - 2, "right", items.length, false);
+  assert.equal(at, n - 1);
+  at = pickerStep(at, "right", items.length, false);
+  assert.deepEqual(ring(at), [{ color: "ansi1", at }]);
+  assert.equal(items[at].color, "ansi1");
+  at = pickerStep(at, "right", items.length, true);
+  assert.deepEqual(ring(at), [{ color: "ansi2", at }]);
+  assert.equal(items[at].color, "ansi2");
+  assert.deepEqual(icons.map((r) => r.length), [6, 6, 6]);
+  assert.equal(pickerStep(n - 1, "down", items.length, false), items.length - 1);
+  assert.equal(pickerStep(null, "left", items.length, false), items.length - 1);
 });
 
 test("the icon mod's agenticon.js is an exact copy", () => {
