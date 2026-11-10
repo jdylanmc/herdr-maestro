@@ -74,7 +74,9 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   space's agents under worktree/repo rows; **Agents** lists each space's agents directly, nesting workers
   under the agent that launched them (across worktrees). Copilot subagents show under their agent in both.
 - Agent cards: icon (Nerd Font glyph and color an agent picks with `maestro icon`, else one from
-  its name), name, status and task, tags (yours filled, the agent's own outlined), and an animated
+  its name; click or right-click it, or **Icon…** in the footer, to pick a preset, a custom glyph and a
+  theme or `#rrggbb` color for any agent: your pick wins, kept per session, and Reset hands it back.
+  Precedence: yours > the agent's > its program's > automatic), name, status and task, tags (yours filled, the agent's own outlined), and an animated
   pet whose mood follows the session (working, delegating, question, needs permission, sad, …).
   Hovering a card shows actions, each only on click: **interrupt** (working), **peek** and **keep as
   tab** (pane-less workers), **park** (Maestro workers with a pane; they keep running pane-less).
@@ -162,7 +164,7 @@ maestro tag add|rm|set|ls [tags]        # ls shows each tag's human-picked color
 maestro mood <happy|focused|thinking|proud|confused|stuck|sleepy|celebrating|clear>
 maestro name <short>
 maestro pin [on|off]                    # pin this agent to the top of Herdr's and Maestro's lists
-maestro icon <preset|glyph> [color]     # robot, code, bug, eye, shield, compass, brush, …
+maestro icon <preset|glyph> [color]     # robot, code, bug, eye, …; no argument also shows the human's pick (it wins)
 maestro pet ls | use <id|clear> | default <id>
 maestro pet add <folder|pet.json> [--link] [--force] | render [--force]
 maestro readiness                       # why this session is or is not fully visible
@@ -197,8 +199,8 @@ Background `--task` routing supports Copilot; other agents need explicit provide
 ## Layout
 
 - `mods/maestro/`, `mods/maestro-tags/`, `mods/maestro-pets/`, `mods/maestro-launch/` (agent menu), `mods/maestro-menu/`
-  (terminal right-click menu: Copy, Paste, then Herdr's items), `mods/maestro-color/` (space color picker): Herdr app mods
-  (`mods/maestro-pets/petlib.js` and `mods/maestro-color/spacecolor.js` are copies of their `mods/maestro/` originals; mods cannot import across folders).
+  (terminal right-click menu: Copy, Paste, then Herdr's items), `mods/maestro-color/` (space color picker), `mods/maestro-icon/` (agent icon picker): Herdr app mods
+  (`mods/maestro-pets/petlib.js`, `mods/maestro-color/spacecolor.js` and `mods/maestro-icon/agenticon.js` are copies of their `mods/maestro/` originals; mods cannot import across folders).
 - `layouts/maestro.json`: the Maestro layout.
 - `bin/`: `maestro` CLI and the status-line bridge.
 - `skills/herdr-maestro/`: Copilot skill for the CLI.

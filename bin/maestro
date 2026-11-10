@@ -435,9 +435,16 @@ const commands = {
   },
 
   // This agent's icon in Maestro: a preset name or one Nerd Font glyph, with an optional #rrggbb color.
+  // The human's pick in Maestro (shared "maestro.icons", by session) wins; with no argument it shows as `human`.
   icon([glyph, color]) {
     const me = needMe();
-    if (!glyph) { const r = recordOf(me); out({ icon: r.icon ?? null, color: r.color ?? null, presets: ICON_PRESETS }); return; }
+    if (!glyph) {
+      const r = recordOf(me);
+      const cfg = sharedConfig();
+      const human = (cfg["maestro.icons"] ?? {})[(cfg["maestro.sessionKeys"] ?? {})[me] ?? me] ?? null;
+      out({ icon: r.icon ?? null, color: r.color ?? null, human, presets: ICON_PRESETS });
+      return;
+    }
     if (glyph === "clear") { saveRecord(me, { icon: null, color: null }); out({ icon: null }); return; }
     if (!ICON_PRESETS.includes(glyph) && [...glyph].length !== 1) fail(`icon must be one of ${ICON_PRESETS.join(", ")} or a single Nerd Font glyph`);
     if (color && !/^(#[0-9a-fA-F]{6}|ansi[1-6]|accent|working|blocked|done)$/.test(color)) fail("color must be a theme color (ansi1-ansi6, accent, working, blocked, done) or #rrggbb");
@@ -553,7 +560,7 @@ const commands = {
   maestro mood <${MOODS.join("|")}|clear>
   maestro name <short name>            label shown in Maestro
   maestro pin [on|off]                 pin this agent to the top of Herdr's and Maestro's lists
-  maestro icon <preset|glyph> [color]   this agent's icon; color: theme name (ansi1-6, accent…) or #rrggbb (no argument lists presets; clear resets)
+  maestro icon <preset|glyph> [color]   this agent's icon; color: theme name (ansi1-6, accent…) or #rrggbb (no argument lists presets and the human's pick, which wins; clear resets)
   maestro pet ls                       pets you can pick (mine/default marked)
   maestro pet use <id|clear>           this session's pet (kept across restarts and resumes)
   maestro pet default <id>             pet for sessions that have not picked one

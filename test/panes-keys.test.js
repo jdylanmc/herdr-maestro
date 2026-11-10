@@ -5,6 +5,8 @@ import vm from "node:vm";
 import { nestSpaces, spacePlace } from "../mods/maestro/wtlib.js";
 import { machineOf, spaceEntries, remoteArgv } from "../mods/maestro/machines.js";
 import { spaceFill, inkOn } from "../mods/maestro/spacecolor.js";
+import { ICON_KEY, PICKER, resolveIcon } from "../mods/maestro/agenticon.js";
+import { isCopilot } from "../mods/maestro/agentlib.js";
 import { launchItems, launchHeight, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
 import * as reorder from "../mods/maestro/reorder.js";
 import * as projection from "../mods/maestro/projection.js";
@@ -48,7 +50,7 @@ function loadMod(name, { initialToken, modProps = {}, paneList = [], spaceList =
     spaces: () => spaceList,
     machines: () => [],
     exec: execImpl,
-    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ...reorder, ...projection,
+    nestSpaces, spacePlace, machineOf, spaceEntries, remoteArgv, spaceFill, inkOn, ICON_KEY, PICKER, resolveIcon, isCopilot, ...reorder, ...projection,
     appHome: () => "/local-herdr",
     openOverlay: (spec) => { overlays.push(spec); },
     closeOverlay() {},
@@ -229,6 +231,22 @@ test("a worktree space nested under its checkout opens the picker from its branc
   board.mod.spaceRow({}, sp, [], new Map(), { id: "s1" });
   board.click("spc-s2", null);
   assert.deepEqual(board.overlays.map((o) => [o.mod, o.props.space]), [["maestro-color", "s2"]]);
+});
+
+test("clicking an agent card's icon opens its icon picker without focusing or dragging the agent", () => {
+  const board = loadMod("maestro", { paneList: [{ pane: "p1", tab: "tab1" }] });
+  const focusedAgents = [];
+  board.mod.focus = (x) => focusedAgents.push(x.a.address);
+  board.mod.title = () => "Builder";
+  const x = { a: { address: "t7", status: "idle", app: "claude-code", program: { icon: "agents/claude.svg", tint: true } }, rec: { icon: "bug", color: "ansi2" }, tagKey: "session-7" };
+  board.mod.pickableIcon({}, x, 20);
+  let stopped = false;
+  board.elements.get("icon-t7").events.down({ position: { x: 4, y: 4 } }, { stop_propagation() { stopped = true; } });
+  assert.equal(stopped, true, "the press never reaches the card's drag");
+  board.click("icon-t7", "p1");
+  assert.deepEqual(JSON.parse(JSON.stringify(board.overlays.map((o) => [o.mod, o.kind, o.height, o.props]))), [["maestro-icon", "popup", PICKER.height,
+    { key: "session-7", label: "Builder", terminal: "t7", agent: { icon: "bug", color: "ansi2" }, program: { icon: "agents/claude.svg", tint: true } }]]);
+  assert.deepEqual(focusedAgents, []);
 });
 
 test("keyboard navigation can reopen a machine when every machine is folded", async () => {

@@ -68,6 +68,15 @@ test("icon, mood, tag, and name update this terminal's record", (t) => {
   assert.deepEqual({ icon: r.icon, color: r.color, mood: r.mood, tags: r.tags, name: r.name }, { icon: null, color: null, mood: "focused", tags: ["ci"], name: "builder" });
 });
 
+test("icon with no argument shows the human's pick for this session, which wins in Maestro", (t) => {
+  const { home, maestro } = setup(t);
+  assert.equal(maestro(["icon"]).out.human, null);
+  writeFileSync(join(home, "shared.json"), JSON.stringify({ "maestro.sessionKeys": { [TERM]: "session-1" }, "maestro.icons": { "session-1": { icon: "star", color: "ansi3" } } }));
+  maestro(["icon", "bug"]);
+  const r = maestro(["icon"]).out;
+  assert.deepEqual({ icon: r.icon, human: r.human }, { icon: "bug", human: { icon: "star", color: "ansi3" } });
+});
+
 test("notify queues a toast for the mod", (t) => {
   const { home, maestro } = setup(t);
   const r = maestro(["notify", "Build", "is", "green"]);

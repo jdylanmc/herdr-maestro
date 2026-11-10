@@ -9,7 +9,7 @@ KEY="${MAESTRO_KEY:-cmd-shift-m}"
 RETURN_LAYOUT="${MAESTRO_RETURN_LAYOUT:-main}"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/mods/maestro-launch" "$HERDR/mods/maestro-menu" "$HERDR/mods/maestro-color" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
+  for p in "$HERDR/mods/maestro" "$HERDR/mods/maestro-tags" "$HERDR/mods/maestro-pets" "$HERDR/mods/maestro-launch" "$HERDR/mods/maestro-menu" "$HERDR/mods/maestro-color" "$HERDR/mods/maestro-icon" "$HERDR/layouts/maestro.json" "$HOME/.local/bin/maestro" "$COPILOT/skills/herdr-maestro"; do
     if [[ -L "$p" && "$(readlink "$p")" == "$ROOT"* ]]; then rm "$p"; echo "removed $p"; fi
   done
   python3 "$ROOT/scripts/lib/uninstall.py" "$COPILOT/settings.json" "$HERDR/keys.json"
@@ -29,6 +29,7 @@ link "$ROOT/mods/maestro-pets" "$HERDR/mods/maestro-pets"
 link "$ROOT/mods/maestro-launch" "$HERDR/mods/maestro-launch"
 link "$ROOT/mods/maestro-menu" "$HERDR/mods/maestro-menu"
 link "$ROOT/mods/maestro-color" "$HERDR/mods/maestro-color"
+link "$ROOT/mods/maestro-icon" "$HERDR/mods/maestro-icon"
 
 # Herdr refuses a layout that names a missing mod and silently shows its default view instead.
 python3 - "$ROOT/layouts/maestro.json" "$HERDR/mods" "$ROOT/scripts/lib/herdr-mods.json" <<'PY'
@@ -94,4 +95,5 @@ herdr-app check "$ROOT/mods/maestro-tags"
 herdr-app check "$ROOT/mods/maestro-pets"
 herdr-app check "$ROOT/mods/maestro-menu"
 herdr-app check "$ROOT/mods/maestro-color"
+herdr-app check "$ROOT/mods/maestro-icon"
 echo "Maestro installed. $KEY toggles the maestro layout. Restart Copilot sessions to enable the status-line bridge."
