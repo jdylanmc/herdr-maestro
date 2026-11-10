@@ -1048,7 +1048,10 @@ export default class Maestro extends View {
   }
 
   focus(x) { const st = find(layout(), "work-stack"); if (st && st.active && st.active !== "main") run("layout.select", { stack: "work-stack", child: "main" }); run(x.a.pane ? "agent.focus" : "terminal.peek", { terminal: x.a.address }); }
-  title(x) { return x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? ((x.a.title ?? "").replace(/ - GitHub Copilot$/, "") || x.a.program?.name || x.a.address); }
+  title(x) {
+    const tab = spaces().find((sp) => sp.id === x.a.space)?.tabs?.find((tb) => tb.id === x.a.tab);
+    return (tab?.named ? tab.name : null) ?? x.a.handle ?? x.rec.name ?? x.snap?.session_name ?? ((x.a.title ?? "").replace(/ - GitHub Copilot$/, "") || x.a.program?.name || x.a.address);
+  }
   task(x) {
     const name = x.snap?.session_name || (x.a.title ?? "").replace(/ - GitHub Copilot$/, "");
     return name && name !== this.title(x) ? name : x.a.tab_name ?? "";
