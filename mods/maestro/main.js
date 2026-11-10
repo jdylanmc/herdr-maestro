@@ -1606,7 +1606,8 @@ export default class Maestro extends View {
     };
     const head = (label) => div().px(8).pt(6).pb(2).text_size(11).text_color(t.dim).child(label);
     const dark = list.filter((th) => !th.light);
-    return v_flex().id("maestro-themes").track_focus(this.handle).size_full().min_h(0).p(8).gap(2).bg(t.popover ?? t.raised).text_color(t.foreground)
+    // Herdr sizes a popup to its content, so the picker sets its height or the list collapses.
+    return v_flex().id("maestro-themes").track_focus(this.handle).w_full().h(460).min_h(0).p(8).gap(2).bg(t.popover ?? t.raised).text_color(t.foreground)
       .on_key_down((e, cx) => {
         if (e.key === "escape") closeOverlay(props().overlay);
         else if (e.key === "down") this.themeAt = (this.themeAt + 1) % list.length;

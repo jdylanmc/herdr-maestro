@@ -27,3 +27,13 @@ export function moveSelection(items, at, step) {
   }
   return at;
 }
+
+// The popup's height for these rows: Herdr sizes a popup to its content (`height` is only the
+// most it grows to), so the menu sets its own height; a `flex_1` list would collapse to nothing.
+export const ROW_H = 31;
+export const MAX_H = 300;
+export function launchHeight(items, { loading = false } = {}) {
+  const chrome = 10 + 24; // root padding + the "Start an agent here" heading
+  const sep = items.some((it) => it.kind === FOLDER) ? 7 : 0;
+  return Math.min(MAX_H, chrome + items.length * ROW_H + sep + (loading ? 30 : 0));
+}

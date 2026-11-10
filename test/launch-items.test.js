@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { launchItems, moveSelection, FOLDER } from "../mods/maestro-launch/items.js";
+import { launchItems, launchHeight, moveSelection, FOLDER, ROW_H, MAX_H } from "../mods/maestro-launch/items.js";
 
 const agents = [
   { key: "claude", installed: true },
@@ -34,4 +34,14 @@ test("selection wraps and skips agents that are not installed", () => {
   assert.equal(moveSelection(items, 6, 1), 0);
   assert.equal(moveSelection(items, 0, -1), 6);
   assert.equal(moveSelection(items, 6, -1), 2);
+});
+
+test("the menu sets its own height so its rows show in a content-sized popup", () => {
+  const one = launchItems([], { local: false });
+  assert.ok(launchHeight(one) >= ROW_H + 24, "the Copilot row fits under the heading");
+  const local = launchItems([], { local: true });
+  assert.ok(launchHeight(local, { loading: true }) > launchHeight(local), "room for the loading note");
+  assert.ok(launchHeight(local) >= local.length * ROW_H + 24);
+  const many = Array.from({ length: 20 }, (_, i) => ({ key: `x${i}`, installed: true }));
+  assert.equal(launchHeight(launchItems(many)), MAX_H, "a long list scrolls inside the cap");
 });
