@@ -43,10 +43,11 @@ export function mergeOrder(order, keys, cap = ORDER_CAP) {
 }
 
 // Items in their saved order: pinned first, then ranked ones by saved position, then the rest
-// in the order given (a stable sort).
+// in the order given (a stable sort). keyOf may return one key or candidate keys.
 export function arrange(items, keyOf, order, pinnedOf = () => false) {
   const rank = new Map((Array.isArray(order) ? order : []).map((k, n) => [k, n]));
-  const r = (x) => rank.get(keyOf(x)) ?? Infinity;
+  // keyOf may give several keys (current first, then older ones it was saved under).
+  const r = (x) => { for (const k of [keyOf(x)].flat()) if (rank.has(k)) return rank.get(k); return Infinity; };
   return [...items].sort((p, q) => {
     const pin = Number(Boolean(pinnedOf(q))) - Number(Boolean(pinnedOf(p)));
     if (pin) return pin;
@@ -83,4 +84,25 @@ export function spaceMoveIndex(rawIds, from, to, edge) {
   const j = rest.indexOf(to);
   if (j < 0 || !rawIds.includes(from) || !edge) return null;
   return j + (edge === "bottom" ? 1 : 0) + 1;
+}
+
+// Stable start order: each key keeps the slot it had when first seen, new keys append. `mem` is
+// { at: Map, next } and updated in place; keys never leave so hidden-then-shown rows keep their slot.
+export function startOrder(mem, keys) {
+  for (const k of keys) if (!mem.at.has(k)) mem.at.set(k, mem.next++);
+  return mem;
+}
+
+// Siblings by start order only. Status, focus, activity (Herdr's seq) and time never move a row.
+export function byStart(mem, keyOf) {
+  const r = (x) => mem.at.get(keyOf(x)) ?? Infinity;
+  return (p, q) => { const a = r(p); const b = r(q); return a === b ? 0 : a === Infinity ? 1 : b === Infinity ? -1 : a - b; };
+}
+
+// The new keys a drag's mouse-up on `id` commits, or null: only a press that passed the threshold
+// and lands on another droppable row reorders; a click or a drop on its own slot changes nothing.
+export function dropKeys(drag, id, dst) {
+  if (!drag?.moved || drag.over !== id || !canDrop(drag, dst)) return null;
+  const keys = moveKey(drag.keys, drag.id, id);
+  return keys.every((k, n) => k === drag.keys[n]) ? null : keys;
 }
