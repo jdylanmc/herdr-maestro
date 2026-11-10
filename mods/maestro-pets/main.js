@@ -58,7 +58,7 @@ export default class MaestroPets extends View {
     this.note = null;
     this.handle = cx.focus_handle();
     this.handle.focus();
-    this.at = null; // picker: the keyboard cursor
+    this.cursor = undefined; // picker: the keyboard cursor's pet id (null: Default, undefined: none)
     cx.spawn(async (cx) => {
       await this.load();
       cx.notify();
@@ -261,20 +261,28 @@ export default class MaestroPets extends View {
     closeOverlay(props()?.overlay);
   }
 
+  // The cursor's cell, found by id so a reloaded catalog cannot move it; null when it has none.
+  pickCursor(cells) {
+    if (this.cursor === undefined) return null;
+    const i = cells.findIndex((c) => (c?.id ?? null) === this.cursor);
+    return i < 0 ? null : i;
+  }
+
   pickKey(e, cx, cells) {
-    const n = cells.length;
+    const at = this.pickCursor(cells) ?? this.pickChecked(cells);
     if (e.key === "escape") closeOverlay(props()?.overlay);
-    else if (e.key === "enter") { const c = cells[this.at ?? this.pickChecked(cells)]; if (n) cx.spawn(async (cx) => { await this.pick(c, cx); }); }
+    else if (e.key === "enter") { const c = cells[at]; if (at < cells.length) cx.spawn(async (cx) => { await this.pick(c, cx); }); }
     else if (["left", "right", "up", "down"].includes(e.key)) {
-      this.at = gridMove(this.at ?? this.pickChecked(cells), e.key, n, PICK.cols);
+      const i = gridMove(at, e.key, cells.length, PICK.cols);
+      this.cursor = i == null ? undefined : cells[i]?.id ?? null;
     } else return;
     cx.stop_propagation();
     cx.notify();
   }
 
-  pickCell(t, pet, i, checked, def) {
+  pickCell(t, pet, i, checked, def, at) {
     const shown = pet ?? def;
-    const on = i === checked, cursor = i === this.at;
+    const on = i === checked, cursor = i === at;
     return v_flex().id(`pick-${pet?.id ?? "default"}`).w(PICK.cellW).h(PICK.cellH).flex_none().relative().p(4).gap(2).items_center().rounded(8).cursor_pointer()
       .border_1().border_color(cursor ? t.foreground : on ? t.accent : t.border).bg(on ? t.selected : t.surface)
       .hover((s) => s.bg(t.hover)).tooltip(pet ? pet.name ?? pet.id : `Default${def ? ` (${def.name ?? def.id})` : ""}: Maestro's pet for sessions without their own`)
@@ -290,6 +298,7 @@ export default class MaestroPets extends View {
     const p = props() ?? {};
     const cells = this.pickCells();
     const checked = this.pickChecked(cells);
+    const at = this.pickCursor(cells);
     const def = resolvePet(this.pets, chosenPet({ default: shared("maestro.pet") ?? null }, null));
     const button = (id, text, action) => div().id(id).px(10).h(26).flex().items_center().rounded(6).cursor_pointer().flex_none()
       .bg(t.raised).text_color(t.foreground).text_size(12).hover((s) => s.bg(t.hover))
@@ -300,7 +309,7 @@ export default class MaestroPets extends View {
       .child(v_flex().id("petpick-grid").h(PICK.gridH).w(PICK.cols * PICK.cellW + (PICK.cols - 1) * PICK.gap).flex_none().overflow_y_scrollbar().gap(PICK.gap)
         .children(this.pets.length
           ? Array.from({ length: Math.ceil(cells.length / PICK.cols) }, (_, r) => h_flex().gap(PICK.gap).flex_none()
-            .children(cells.slice(r * PICK.cols, r * PICK.cols + PICK.cols).map((c, j) => this.pickCell(t, c, r * PICK.cols + j, checked, def))))
+            .children(cells.slice(r * PICK.cols, r * PICK.cols + PICK.cols).map((c, j) => this.pickCell(t, c, r * PICK.cols + j, checked, def, at))))
           : [div().p(12).text_color(t.dim).child(this.progress?.state === "rendering" ? "Rendering pets…" : "No pets yet")]))
       .child(h_flex().gap(6).items_center()
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(this.note ? t.blocked : t.dim).child(this.note ?? "Arrows · Enter · Esc"))

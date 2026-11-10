@@ -449,7 +449,7 @@ test("the pet picker writes the agent's choice to the live cache and choices.jso
   assert.equal(pick.mod.pickChecked(cells), 0);
   pick.mod.pickKey({ key: "right" }, pick.cx, cells);
   pick.mod.pickKey({ key: "right" }, pick.cx, cells);
-  assert.equal(pick.mod.at, 2);
+  assert.equal(pick.mod.cursor, "koda");
   pick.mod.pickKey({ key: "enter" }, pick.cx, cells);
   await pick.tasks.pop()(pick.cx);
   assert.deepEqual(plain(pick.store.get("maestro.pets")), { "sess-7": "koda" });
@@ -475,4 +475,24 @@ test("the pet picker stays open, shows why and restores the cache when choices.j
   assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "eve" });
   assert.deepEqual(pick.closed.length, 0);
   assert.equal(pick.mod.note, "Could not save choices.json");
+});
+
+test("Enter in the pet picker never clears the choice when a reload removes the pet under the cursor", async () => {
+  let file = JSON.stringify({ default: null, sessions: { "sess-7": "koda" } });
+  const extra = {
+    ...petlib, image: () => null,
+    readTextFile: async () => file,
+    writeTextFile: async (_path, text) => { file = text; },
+    fs: { mkdir: async () => {} },
+  };
+  const pick = loadMod("maestro-pets", { modProps: { view: "pick", key: "sess-7", overlay: "ov" }, extra });
+  pick.store.set("maestro.pets", { "sess-7": "koda" });
+  pick.mod.pets = pets;
+  pick.mod.pickKey({ key: "right" }, pick.cx, pick.mod.pickCells());
+  assert.equal(pick.mod.cursor, "eve");
+  pick.mod.pets = pets.filter((p) => p.id !== "eve");
+  pick.mod.pickKey({ key: "enter" }, pick.cx, pick.mod.pickCells());
+  await pick.tasks.pop()(pick.cx);
+  assert.deepEqual(JSON.parse(file).sessions, { "sess-7": "koda" });
+  assert.deepEqual(JSON.parse(JSON.stringify(pick.store.get("maestro.pets"))), { "sess-7": "koda" });
 });
