@@ -119,8 +119,10 @@ and pets you add (`data/maestro/pet-sources/`). The first id found wins, in that
 - **Choosing:** each session keeps its pet in `data/maestro/pets/choices.json`
   (`{ "default": id, "sessions": { "<copilot session id>": id } }`, written atomically), so it
   survives app restarts and `copilot --resume`. Herdr's `shared("maestro.pets")` mirrors it live.
-  Agents choose their own with `maestro pet use <id>`; clicking the footer pet opens the pokedex; **Moods…**
-  previews each mood.
+  Agents choose their own with `maestro pet use <id>`; **Moods…** previews each mood.
+- **Pet picker:** click or right-click the pet on any agent card (sidebar, board or footer) for a
+  compact grid of pets: pick one for that agent, **Default** clears its own choice, **Open pokedex…**
+  opens the full pokedex. Arrows, Enter and Esc work too. Same `choices.json` keys as `maestro pet use`.
 - **Pokedex** (`cmd-shift-k`, the `maestro-pets` mod): every pet with its idle animation, source and
   render errors; select one for its description, all 15 moods (9-row sheets reuse rows for moods
   they lack), the sessions using it, **Use for focused session** and **Make default**. **Rescan**

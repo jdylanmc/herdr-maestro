@@ -1,10 +1,11 @@
 // Maestro's pet pokedex: every rendered pet, its moods, who uses it, and choosing pets.
 // Opened by maestro's `pets` command (openOverlay kind "window", key "maestro-pets").
+// props.view "pick": the compact picker popup an agent card's pet opens (props { key, label }).
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, panes, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay, run } from "herdr";
+import { agents, panes, theme, shared, setShared, exec, home, appHome, readTextFile, writeTextFile, watchFolder, focused, props, closeOverlay, openOverlay, layout, run } from "herdr";
 import * as fs from "fs/promises";
-import { MOODS, moodRow, moodGif, petRoots, parseChoices, setChoice, chosenPet, resolvePet } from "./petlib.js";
+import { MOODS, moodRow, moodGif, petRoots, parseChoices, setChoice, chosenPet, resolvePet, gridMove } from "./petlib.js";
 
 const dataDir = () => `${appHome()}/data/maestro`;
 const petDir = () => `${dataDir()}/pets`;
@@ -15,6 +16,12 @@ const SOURCE = { codex: "Codex", maestro: "Maestro", added: "Added", other: "Oth
 const ADD_HINT = "maestro pet add <folder or pet.json>";
 
 const back = () => run("layout.select", { stack: "work-stack", child: "main" });
+const find = (node, id) => { if (node?.id === id) return node; for (const c of node?.children ?? []) { const f = find(c, id); if (f) return f; } return null; };
+
+// The picker popup's grid. Herdr sizes popups to their content (height is only a maximum), so
+// the grid has an explicit height rather than filling the popup.
+// maestro's openPetPick opens it 330×392: 4 cells + gaps + padding wide, grid + header + footer tall.
+const PICK = { cols: 4, cellW: 72, cellH: 86, gap: 6, gridH: 288 };
 
 // The pokedex as a mod pane (props.place "pane"): its own tab, or split beside the focused pane.
 // Same as mods/maestro/main.js openModPane/closeModPane (mods cannot share modules, G-10).
@@ -51,6 +58,7 @@ export default class MaestroPets extends View {
     this.note = null;
     this.handle = cx.focus_handle();
     this.handle.focus();
+    this.at = null; // picker: the keyboard cursor
     cx.spawn(async (cx) => {
       await this.load();
       cx.notify();
@@ -94,7 +102,7 @@ export default class MaestroPets extends View {
   // Live cache first for instant feedback, then choices.json (atomic, retried when stale).
   async choose(key, id) {
     if (key == null) setShared("maestro.pet", id);
-    else setShared("maestro.pets", { ...(shared("maestro.pets") ?? {}), [key]: id });
+    else { const s = { ...(shared("maestro.pets") ?? {}) }; if (id == null) delete s[key]; else s[key] = id; setShared("maestro.pets", s); }
     for (let i = 0; i < 3; i++) {
       let before = null;
       try { before = await readTextFile(choicesPath()); } catch {}
@@ -137,6 +145,7 @@ export default class MaestroPets extends View {
 
   render() {
     const t = theme();
+    if (props()?.view === "pick") return this.renderPick(t);
     const list = this.sessions();
     const failed = this.pets.filter((p) => p.error).length;
     const def = shared("maestro.pet") ?? "maestro";
@@ -218,5 +227,75 @@ export default class MaestroPets extends View {
             .child(image(moodGif(p, m)).w(56).h(61))
             .child(div().w_full().text_center().truncate().text_size(10.5).text_color(own ? t.foreground : t.dim).child(m));
         })))));
+  }
+
+  // ---- Picker popup: one agent's pet (props.key: Maestro's session key for it) ----
+  // Cell 0 is "Default" (clears the agent's own choice); the rest are the rendered pets.
+  pickCells() { return [null, ...this.pets.filter((p) => !p.error)]; }
+
+  pickChecked(cells) {
+    const own = (shared("maestro.pets") ?? {})[props()?.key] ?? null;
+    const i = own ? cells.findIndex((p) => p?.id === own) : 0;
+    return i < 0 ? 0 : i;
+  }
+
+  async pick(pet) {
+    const p = props() ?? {};
+    if (p.key == null) return;
+    await this.choose(p.key, pet?.id ?? null);
+    closeOverlay(p.overlay);
+  }
+
+  openPokedex() {
+    if (find(layout(), "work-stack")) run("layout.select", { stack: "work-stack", child: "maestro-pets" });
+    else openOverlay({ kind: "window", mod: "maestro-pets", key: "maestro-pets", width: 980, height: 680 });
+    closeOverlay(props()?.overlay);
+  }
+
+  pickKey(e, cx, cells) {
+    const n = cells.length;
+    if (e.key === "escape") closeOverlay(props()?.overlay);
+    else if (e.key === "enter") { const c = cells[this.at ?? this.pickChecked(cells)]; if (n) cx.spawn(async () => { await this.pick(c); }); }
+    else if (["left", "right", "up", "down"].includes(e.key)) {
+      this.at = gridMove(this.at ?? this.pickChecked(cells), e.key, n, PICK.cols);
+    } else return;
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  pickCell(t, pet, i, checked, def) {
+    const shown = pet ?? def;
+    const on = i === checked, cursor = i === this.at;
+    return v_flex().id(`pick-${pet?.id ?? "default"}`).w(PICK.cellW).h(PICK.cellH).flex_none().relative().p(4).gap(2).items_center().rounded(8).cursor_pointer()
+      .border_1().border_color(cursor ? t.foreground : on ? t.accent : t.border).bg(on ? t.selected : t.surface)
+      .hover((s) => s.bg(t.hover)).tooltip(pet ? pet.name ?? pet.id : `Default${def ? ` (${def.name ?? def.id})` : ""}: Maestro's pet for sessions without their own`)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => cx.spawn(async () => { await this.pick(pet); }))
+      .child(shown ? image(moodGif(shown, "idle")).w(52).h(56).flex_none().when(!pet, (el) => el.opacity(0.55))
+        : div().size(52).flex_none())
+      .child(div().w_full().text_center().truncate().text_size(11).text_color(pet ? t.foreground : t.muted).child(pet ? pet.name ?? pet.id : "Default"))
+      .when(on, (el) => el.child(div().absolute().top(3).right(5).text_size(11).font_bold().text_color(t.accent).child("✓")));
+  }
+
+  renderPick(t) {
+    const p = props() ?? {};
+    const cells = this.pickCells();
+    const checked = this.pickChecked(cells);
+    const def = resolvePet(this.pets, chosenPet({ default: shared("maestro.pet") ?? null }, null));
+    const button = (id, text, action) => div().id(id).px(10).h(26).flex().items_center().rounded(6).cursor_pointer().flex_none()
+      .bg(t.raised).text_color(t.foreground).text_size(12).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(action).child(text);
+    return v_flex().id("maestro-petpick").track_focus(this.handle).on_key_down((e, cx) => this.pickKey(e, cx, cells))
+      .w_full().p(12).gap(8).bg(t.popover).text_color(t.foreground).text_size(12.5)
+      .child(div().truncate().font_semibold().child(`Pet for ${p.label ?? "agent"}`))
+      .child(v_flex().id("petpick-grid").h(PICK.gridH).w(PICK.cols * PICK.cellW + (PICK.cols - 1) * PICK.gap).flex_none().overflow_y_scrollbar().gap(PICK.gap)
+        .children(this.pets.length
+          ? Array.from({ length: Math.ceil(cells.length / PICK.cols) }, (_, r) => h_flex().gap(PICK.gap).flex_none()
+            .children(cells.slice(r * PICK.cols, r * PICK.cols + PICK.cols).map((c, j) => this.pickCell(t, c, r * PICK.cols + j, checked, def))))
+          : [div().p(12).text_color(t.dim).child(this.progress?.state === "rendering" ? "Rendering pets…" : "No pets yet")]))
+      .child(h_flex().gap(6).items_center()
+        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child("Arrows · Enter · Esc"))
+        .child(button("pick-pokedex", "Open pokedex…", () => this.openPokedex()))
+        .child(button("pick-close", "Close", () => closeOverlay(p.overlay))));
   }
 }
