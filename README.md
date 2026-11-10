@@ -94,7 +94,7 @@ dark then light. Picking one runs `app.theme`, which sets the shown layout's the
   context, AIC, subagents and Beats come from Copilot's status line and session log, so only Copilot shows them.
 - **Pins**: hover a card for its pin (Herdr's `terminal.pin`, shared with Herdr's own agent list and
   every client); pinned agents sort first in their group and show a small pin.
-- **Drag to reorder**: drag a space (Herdr's own `space.move`, within its machine; worktree spaces among their parent's), a worktree group or an agent card among its siblings (kept in `shared("maestro.order")` / `shared("maestro.treeOrder")`, pinned and unpinned stay apart); Escape or leaving the list cancels.
+- **Drag to reorder**: drag a space (Herdr's own `space.move`, within its machine; worktree spaces among their parent's), a worktree group or an agent card among its siblings (kept in `shared("maestro.order")` / `shared("maestro.treeOrder")`, pinned and unpinned stay apart); Escape or leaving the list cancels. Rows otherwise keep their start order in both views: new agents append to their group, and status, focus, clicks or activity never move a row (urgency shows in glyphs and the attention strip).
 - **Alerts** (header, both off by default, kept in `shared("maestro.sounds")` / `shared("maestro.autoSettle")`):
   the bell chimes once when an agent starts needing you and Herdr's own sound doesn't already
   (Herdr chimes for agents in panes that report blocked; right-click the bell for Herdr's Settings > Alerts).

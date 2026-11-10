@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pastThreshold, canDrop, moveKey, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex } from "../mods/maestro/reorder.js";
+import { pastThreshold, canDrop, moveKey, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex, startOrder, byStart, dropKeys } from "../mods/maestro/reorder.js";
 import { nestSpaces } from "../mods/maestro/wtlib.js";
 
 test("a press only becomes a drag past the threshold", () => {
@@ -74,4 +74,43 @@ test("space groups keep machines apart", () => {
   const groups = spaceGroups([{ sp: { id: "a" }, tree: null }, { sp: { id: "header", header: true } }, { sp: { id: "box/a", machine: "box" }, tree: null }]);
   assert.deepEqual(groups.map((g) => [g.id, g.group, g.band, [...g.keys]]), [["a", "", null, ["a"]], ["box/a", "box", null, ["box/a"]]]);
   assert.equal(spaceMoveIndex(["a", "b"], "a", "missing", "top"), null);
+});
+
+// The sidebar's sibling order: start order, then pins and saved drags (as render + arrangeAgents).
+const sidebar = (mem, agents, order = null) => {
+  startOrder(mem, agents.map((a) => a.address));
+  return arrange([...agents].sort(byStart(mem, (a) => a.address)), (a) => [a.key ?? a.address, a.address], order, (a) => a.pinned).map((a) => a.address);
+};
+
+test("clicking a done agent (done -> idle, focus, seq bump) keeps every row in place", () => {
+  // Human's case: "Locate…" (done), KUSTO (idle), DATABRICKS (focused, idle) in one worktree.
+  const mem = { at: new Map(), next: 0 };
+  const before = [{ address: "locate", status: "done", seq: 2 }, { address: "kusto", status: "idle", seq: 3 }, { address: "databricks", status: "idle", seq: 1, focused: true }];
+  const first = sidebar(mem, before);
+  const after = [{ address: "databricks", status: "idle", seq: 1 }, { address: "locate", status: "idle", seq: 9 }, { address: "kusto", status: "working", seq: 12, focused: true }];
+  assert.deepEqual(sidebar(mem, after), first);
+});
+
+test("new agents append to their group; hidden ones keep their slot when shown again", () => {
+  const mem = { at: new Map(), next: 0 };
+  assert.deepEqual(sidebar(mem, [{ address: "b" }, { address: "a" }]), ["b", "a"]);
+  assert.deepEqual(sidebar(mem, [{ address: "0" }, { address: "a" }, { address: "b" }]), ["b", "a", "0"]);
+  sidebar(mem, [{ address: "0" }]);
+  assert.deepEqual(sidebar(mem, [{ address: "0" }, { address: "b" }]), ["b", "0"]);
+  assert.deepEqual(sidebar(mem, [{ address: "0" }, { address: "b", pinned: true }, { address: "a" }], ["0"]), ["b", "0", "a"], "pins and drags still apply");
+});
+
+test("a row saved under its address keeps its place once its session id is known", () => {
+  const mem = { at: new Map(), next: 0 };
+  assert.deepEqual(sidebar(mem, [{ address: "a" }, { address: "b", key: "sess-b" }], ["b", "a"]), ["b", "a"]);
+});
+
+test("only a real drag to another slot writes an order", () => {
+  const item = (id) => ({ kind: "agent", id, group: "g", band: false, keys: ["a", "b", "c"] });
+  const press = { ...item("a"), start: { x: 0, y: 0 }, over: "a" };
+  assert.equal(dropKeys({ ...press, moved: false }, "a", item("a")), null, "a click is not a drop");
+  assert.equal(dropKeys({ ...press, moved: false, over: "c" }, "c", item("c")), null, "mouse-up under the threshold on another row is not a drop");
+  assert.equal(dropKeys({ ...press, moved: true }, "a", item("a")), null, "a drop on its own slot is a no-op");
+  assert.equal(dropKeys({ ...press, moved: true, over: "b" }, "c", item("c")), null, "mouse-up off the marked row is not a drop");
+  assert.deepEqual(dropKeys({ ...press, moved: true, over: "c" }, "c", item("c")), ["b", "c", "a"]);
 });

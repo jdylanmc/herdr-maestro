@@ -15,7 +15,7 @@ import { MOOD_ROWS, petRoots, parseChoices, setChoice, mergeChoices, chosenPet, 
 import { nestSpaces, spacePlace } from "./wtlib.js";
 import { machineOf, localAddress, spaceEntries, PROBE, parseProbe, remoteArgv } from "./machines.js";
 import { spaceFill, inkOn } from "./spacecolor.js";
-import { pastThreshold, canDrop, moveKey, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex } from "./reorder.js";
+import { pastThreshold, canDrop, lineEdge, mergeOrder, arrange, spaceGroups, spaceMoveIndex, startOrder, byStart, dropKeys } from "./reorder.js";
 import { PROJECTIONS, projectionOf, nestsUnder } from "./projection.js";
 
 const KEEP_FINISHED_MS = 10 * 60_000;
@@ -517,8 +517,10 @@ export default class Maestro extends View {
       kidsOf.get(p.a.address).push(x);
       nested.add(x.a.address);
     }
-    const roots = shown.filter((x) => !nested.has(x.a.address));
-    const urgent = (p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.seq - q.a.seq;
+    // Rows keep their start order (then pins and drags); status, focus and activity never move them.
+    const started = byStart(startOrder(this.startSeen ??= { at: new Map(), next: 0 }, list.map((x) => x.a.address)), (x) => x.a.address);
+    const roots = shown.filter((x) => !nested.has(x.a.address)).sort(started);
+    const stable = (p, q) => pinFirst(p.a, q.a) || started(p, q);
     const order = [];
     const rows = [];
     const narrow = (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
@@ -541,7 +543,7 @@ export default class Maestro extends View {
       }
       if (proj !== "worktrees") {
         const group = [];
-        for (const x of this.arrangeAgents(`sp:${sp.id}`, mine.sort(urgent))) this.pushAgent(t, group, order, x, kidsOf, now, 0);
+        for (const x of this.arrangeAgents(`sp:${sp.id}`, mine.sort(stable))) this.pushAgent(t, group, order, x, kidsOf, now, 0);
         if (group.length) rows.push(this.guide(t, `g-${sp.id}`, 15, group));
         continue;
       }
@@ -555,7 +557,7 @@ export default class Maestro extends View {
       this.register("tree", sp.id, treeKeys);
       for (const [k, tr] of arrange([...trees], ([k]) => `wt:${sp.id}:${k}`, shared("maestro.treeOrder"))) {
         const fid = `wt:${sp.id}:${k}`;
-        const sorted = this.arrangeAgents(fid, tr.items.sort(urgent));
+        const sorted = this.arrangeAgents(fid, tr.items.sort(stable));
         const group = [];
         const at = this.nav.length;
         if (this.folded.has(fid)) for (const x of sorted) this.walk(x, kidsOf, (y) => order.push(y.a.address));
@@ -949,7 +951,8 @@ export default class Maestro extends View {
     order.push(x.a.address);
     // Only running subagents by default; "show finished" also lists idle and finished ones.
     const tasks = visibleRows(x.s ? treeRows(x.s, now, keepMs()) : [], Boolean(shared("maestro.showFinished")));
-    const kids = this.arrangeAgents(`kids:${x.a.address}`, (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || RANK[q.a.status] - RANK[p.a.status] || p.a.address.localeCompare(q.a.address, undefined, { numeric: true })));
+    const started = byStart(this.startSeen ?? { at: new Map(), next: 0 }, (k) => k.a.address);
+    const kids = this.arrangeAgents(`kids:${x.a.address}`, (kidsOf.get(x.a.address) ?? []).sort((p, q) => pinFirst(p.a, q.a) || started(p, q)));
     this.nav?.push({ key: `ag:${x.a.address}`, x, tasks: tasks.length ? `tasks:${x.a.address}` : null });
     rows.push(this.navRow(t, `ag:${x.a.address}`, this.agentCard(t, x, now, depth), { left: 14 + depth * 14, right: 2, top: 1, bottom: 1 }));
     if (tasks.length) {
@@ -979,7 +982,8 @@ export default class Maestro extends View {
 
   // Siblings in their saved order (pinned first); registers them as one drag group.
   arrangeAgents(group, items) {
-    const out = arrange(items, (x) => x.tagKey, shared("maestro.order"), (x) => x.a.pinned);
+    // A row saved under its terminal address keeps its place once its session id is known.
+    const out = arrange(items, (x) => [x.tagKey, x.a.address], shared("maestro.order"), (x) => x.a.pinned);
     const pinned = new Map(out.map((x) => [x.tagKey, Boolean(x.a.pinned)]));
     this.register("agent", group, out.map((x) => x.tagKey), (k) => pinned.get(k));
     return out;
@@ -1028,11 +1032,12 @@ export default class Maestro extends View {
     const d = this.drag;
     if (!d) return;
     this.endDrag();
-    if (d.moved && d.over === id && canDrop(d, this.dragItems?.get(`${kind}:${id}`))) {
+    const keys = dropKeys(d, id, this.dragItems?.get(`${kind}:${id}`));
+    if (keys) {
       if (kind === "space") {
         const index = spaceMoveIndex(spaces().map((sp) => sp.id), d.id, id, lineEdge(d.keys, d.id, id));
         if (index != null) run("space.move", { id: d.id, index });
-      } else setShared(kind === "tree" ? "maestro.treeOrder" : "maestro.order", mergeOrder(shared(kind === "tree" ? "maestro.treeOrder" : "maestro.order"), moveKey(d.keys, d.id, id)));
+      } else setShared(kind === "tree" ? "maestro.treeOrder" : "maestro.order", mergeOrder(shared(kind === "tree" ? "maestro.treeOrder" : "maestro.order"), keys));
     }
     cx.notify();
   }
